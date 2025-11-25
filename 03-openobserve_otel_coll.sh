@@ -56,8 +56,6 @@ ZO_AUTH_TOKEN=$(encode_base64 "$ZO_USER:$ZO_PASS")
 lk delete application -n argocd-system openobserve-collector opentelemetry-operator prometheus-operator cert-manager --ignore-not-found --wait=true
 # Delete namespaces
 lk delete ns openobserve-collector-system --ignore-not-found --wait=true
-# Note: We usually don't delete cert-manager ns to avoid stuck CRD finalizers, but for clean reinstall we can try:
-# lk delete ns cert-manager --ignore-not-found --wait=true
 
 log "Creating Namespaces & Secrets..."
 lk create ns cert-manager --dry-run=client -o yaml | lk apply -f -
@@ -119,7 +117,7 @@ log "Waiting for Cert Manager Webhook to spin up..."
 sleep 30
 
 # ==============================================================================
-# 4. OPERATORS
+# 4. PROMETHEUS OPERATOR (CRDs only)
 # ==============================================================================
 log "Deploying Prometheus Operator (CRDs only)..."
 PROMETHEUS_OPERATOR_YAML=$(cat <<EOF
@@ -163,55 +161,11 @@ EOF
 )
 deploy_app "prometheus-operator" "$PROMETHEUS_OPERATOR_YAML"
 
-log "Deploying OpenTelemetry Operator..."
-OTEL_OPERATOR_YAML=$(cat <<EOF
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: opentelemetry-operator
-  namespace: argocd-system
-spec:
-  project: default
-  source:
-    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
-    chart: opentelemetry-operator
-    targetRevision: 0.74.0
-    helm:
-      values: |
-        admissionWebhooks:
-          certManager:
-            enabled: true
-          autoGenerateCert:
-            enabled: false
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: openobserve-collector-system
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-EOF
-)
-deploy_app "opentelemetry-operator" "$OTEL_OPERATOR_YAML"
-
-log "Restarting OTel Operator to ensure Webhook Certs are loaded..."
-# Fix: Dynamically find the deployment name instead of guessing
-OTEL_DEP_NAME=$(lk get deployment -n openobserve-collector-system -l app.kubernetes.io/name=opentelemetry-operator -o jsonpath='{.items[0].metadata.name}')
-
-if [ -n "$OTEL_DEP_NAME" ]; then
-    log "Found Deployment: $OTEL_DEP_NAME. Restarting..."
-    lk rollout restart deployment "$OTEL_DEP_NAME" -n openobserve-collector-system
-    lk rollout status deployment "$OTEL_DEP_NAME" -n openobserve-collector-system --timeout=60s
-    log "Waiting for Webhook to be ready..."
-    sleep 10
-else
-    log "WARNING: Could not find OTel Operator deployment to restart. Webhooks might fail."
-fi
-
 # ==============================================================================
-# 5. OPENOBSERVE COLLECTOR
+# 5. OPENOBSERVE COLLECTOR (With Embedded Operator)
 # ==============================================================================
-log "Deploying OpenObserve Collector..."
+log "Deploying OpenObserve Collector (and OTel Operator)..."
+# Note: We enable the embedded opentelemetry-operator dependency here
 COLLECTOR_YAML=$(cat <<EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -227,6 +181,14 @@ spec:
     helm:
       values: |
         k8sCluster: "microk8s-cluster"
+        # Enable the Operator dependency within this chart
+        opentelemetry-operator:
+          enabled: true
+          admissionWebhooks:
+            certManager:
+              enabled: true
+            autoGenerateCert:
+              enabled: false
         exporters:
           "otlphttp/openobserve":
             endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
