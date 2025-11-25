@@ -1,4 +1,5 @@
 #!/bin/bash
+# Filename: 06-restart-screen-sessions.sh
 source ./00-init.sh
 setup_env
 

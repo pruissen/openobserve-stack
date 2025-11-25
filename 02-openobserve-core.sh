@@ -1,4 +1,5 @@
 #!/bin/bash
+# Filename: 02-openobserve_core.sh
 source ./00-init.sh
 setup_env
 
@@ -174,7 +175,7 @@ echo ""
 
 # Port Forward
 log "Setting up Port Forward..."
-screen -dmS zo-pf bash -c 'while true; do microk8s kubectl port-forward svc/openobserve-router -n openobserve-system 5080:5080; sleep 2; done'
+screen -dmS zo-pf bash -c 'while true; do microk8s kubectl port-forward svc/openobserve-router -n openobserve-system --address 0.0.0.0 5080:5080; sleep 2; done'
 sleep 5
 
 success "Core Deployment Complete."

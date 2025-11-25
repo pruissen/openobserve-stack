@@ -1,4 +1,5 @@
 #!/bin/bash
+# Filename: 04-openobserve_iam.sh
 source ./00-init.sh
 setup_env
 check_deps
@@ -19,7 +20,6 @@ decode_base64() {
 
 encode_base64() {
     local input=${1:-$(cat)}
-    # 'tr -d' removes newlines which is crucial for auth headers
     if [[ "$OSTYPE" == "darwin"* ]]; then
         echo -n "$input" | base64
     else
@@ -61,7 +61,7 @@ if ! curl -s --max-time 2 "$ZO_API/default/status" > /dev/null; then
     
     pkill -f "kubectl port-forward.*svc/openobserve-router" || true
     
-    screen -dmS zo-iam-pf bash -c 'while true; do microk8s kubectl port-forward svc/openobserve-router -n openobserve-system 5080:5080; sleep 2; done'
+    screen -dmS zo-iam-pf bash -c 'while true; do microk8s kubectl port-forward svc/openobserve-router -n openobserve-system --address 0.0.0.0 5080:5080; sleep 2; done'
     
     log "Waiting for API to become available..."
     count=0
@@ -81,18 +81,15 @@ fi
 # ==============================================================================
 # 3. PREPARE AUTH HEADERS
 # ==============================================================================
-# Based on docs: Authorization: Basic base64("username:password")
 AUTH_STRING=$(encode_base64 "$ZO_USER:$ZO_PASS")
 AUTH_HEADER="Authorization: Basic $AUTH_STRING"
 
 log "Verifying credentials against API..."
-# We try a simple GET to verify auth before proceeding
 CHECK_AUTH=$(curl -s -o /dev/null -w "%{http_code}" -H "$AUTH_HEADER" "$ZO_API/default/users")
 
 if [ "$CHECK_AUTH" != "200" ]; then
     error "Authentication Failed (HTTP $CHECK_AUTH)."
     echo "Attempted User: $ZO_USER"
-    echo "Please verify that the password in the cluster matches your config."
     exit 1
 else
     success "Authentication verified."
@@ -116,7 +113,6 @@ create_org() {
     if [ "$CODE" == "200" ] || [ "$CODE" == "201" ]; then
         success "Created $NAME"
     elif [ "$CODE" == "409" ] || [[ "$BODY" == *"already exists"* ]]; then
-        # Sometimes 400 is returned for duplicates depending on version
         log "Organization '$NAME' likely already exists (Code: $CODE)."
     else
         error "Failed to create organization '$NAME'. HTTP Code: $CODE"

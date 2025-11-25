@@ -1,4 +1,5 @@
 #!/bin/bash
+# Filename: 01-install-infra.sh
 source ./00-init.sh
 setup_env
 check_deps
@@ -74,7 +75,7 @@ ARGO_PWD=$(lk -n argocd-system get secret argocd-initial-admin-secret -o jsonpat
 
 # Port Forward
 log "Starting ArgoCD Port Forward..."
-screen -dmS argocd-pf bash -c 'while true; do microk8s kubectl port-forward svc/argocd-server -n argocd-system 8443:443; sleep 2; done'
+screen -dmS argocd-pf bash -c 'while true; do microk8s kubectl port-forward svc/argocd-server -n argocd-system --address 0.0.0.0 8443:443; sleep 2; done'
 sleep 5
 
 success "Infrastructure Ready."

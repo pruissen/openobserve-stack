@@ -1,4 +1,5 @@
 #!/bin/bash
+# Filename: 00-init.sh
 
 CONFIG_FILE="config.env"
 
