@@ -2,6 +2,9 @@
 
 A modular bash-based automation suite to deploy a full High-Availability Observability stack on a local Microk8s cluster using GitOps principles (ArgoCD).
 
+
+![Screenshot of OpenObserve](/images/openobserve.png)
+
 ## Components
 
 * **Orchestration**: Microk8s, ArgoCD
