@@ -13,7 +13,7 @@ A modular bash-based automation suite to deploy a full High-Availability Observa
 
 * **Observability Backend**: OpenObserve (HA Mode)
 
-* **Collection**: OpenTelemetry Collector, Prometheus Operator (CRDs)
+* **Collection**: Cert Manager, OpenTelemetry Collector, Prometheus Operator (CRDs)
 
 * **Demo App**: OpenTelemetry Astronomy Shop
 

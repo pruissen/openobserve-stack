@@ -27,7 +27,7 @@ encode_base64() {
 }
 
 # ==============================================================================
-# 1. LOAD CREDENTIALS (SYNC WITH CLUSTER)
+# 1. LOAD CREDENTIALS
 # ==============================================================================
 log "Fetching credentials from Kubernetes Secret..."
 
@@ -47,17 +47,20 @@ else
     ZO_PASS="$ZO_ROOT_PASSWORD"
 fi
 
-# Generate Auth Token for Collector
 ZO_AUTH_TOKEN=$(encode_base64 "$ZO_USER:$ZO_PASS")
 
 # ==============================================================================
 # 2. CLEANUP & PREPARE
 # ==============================================================================
-# We delete the app to stop ArgoCD sync, then the namespace
-lk delete application -n argocd-system openobserve-collector opentelemetry-operator prometheus-operator --ignore-not-found --wait=true
+# Delete apps to stop sync
+lk delete application -n argocd-system openobserve-collector opentelemetry-operator prometheus-operator cert-manager --ignore-not-found --wait=true
+# Delete namespaces
 lk delete ns openobserve-collector-system --ignore-not-found --wait=true
+# Note: We usually don't delete cert-manager ns to avoid stuck CRD finalizers, but for clean reinstall we can try:
+# lk delete ns cert-manager --ignore-not-found --wait=true
 
-log "Creating Namespace & Secret..."
+log "Creating Namespaces & Secrets..."
+lk create ns cert-manager --dry-run=client -o yaml | lk apply -f -
 lk create ns openobserve-collector-system --dry-run=client -o yaml | lk apply -f -
 
 lk create secret generic zo-collector-creds -n openobserve-collector-system \
@@ -66,9 +69,6 @@ lk create secret generic zo-collector-creds -n openobserve-collector-system \
   --from-literal=ZO_ORG="default" \
   --dry-run=client -o yaml | lk apply -f -
 
-# ==============================================================================
-# 3. OPERATORS (Prometheus & OTel)
-# ==============================================================================
 deploy_app() {
     local APP_NAME=$1
     local MANIFEST=$2
@@ -83,6 +83,44 @@ deploy_app() {
     success "$APP_NAME is Healthy."
 }
 
+# ==============================================================================
+# 3. CERT MANAGER (Required for OTel Operator)
+# ==============================================================================
+log "Deploying Cert Manager..."
+CERT_MANAGER_YAML=$(cat <<EOF
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd-system
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: v1.16.0
+    helm:
+      values: |
+        installCRDs: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+EOF
+)
+deploy_app "cert-manager" "$CERT_MANAGER_YAML"
+
+log "Waiting for Cert Manager Webhook to spin up..."
+sleep 30
+
+# ==============================================================================
+# 4. OPERATORS
+# ==============================================================================
 log "Deploying Prometheus Operator (CRDs only)..."
 PROMETHEUS_OPERATOR_YAML=$(cat <<EOF
 apiVersion: argoproj.io/v1alpha1
@@ -142,9 +180,9 @@ spec:
       values: |
         admissionWebhooks:
           certManager:
-            enabled: false
-          autoGenerateCert:
             enabled: true
+          autoGenerateCert:
+            enabled: false
   destination:
     server: https://kubernetes.default.svc
     namespace: openobserve-collector-system
@@ -156,8 +194,22 @@ EOF
 )
 deploy_app "opentelemetry-operator" "$OTEL_OPERATOR_YAML"
 
+log "Restarting OTel Operator to ensure Webhook Certs are loaded..."
+# Fix: Dynamically find the deployment name instead of guessing
+OTEL_DEP_NAME=$(lk get deployment -n openobserve-collector-system -l app.kubernetes.io/name=opentelemetry-operator -o jsonpath='{.items[0].metadata.name}')
+
+if [ -n "$OTEL_DEP_NAME" ]; then
+    log "Found Deployment: $OTEL_DEP_NAME. Restarting..."
+    lk rollout restart deployment "$OTEL_DEP_NAME" -n openobserve-collector-system
+    lk rollout status deployment "$OTEL_DEP_NAME" -n openobserve-collector-system --timeout=60s
+    log "Waiting for Webhook to be ready..."
+    sleep 10
+else
+    log "WARNING: Could not find OTel Operator deployment to restart. Webhooks might fail."
+fi
+
 # ==============================================================================
-# 4. OPENOBSERVE COLLECTOR
+# 5. OPENOBSERVE COLLECTOR
 # ==============================================================================
 log "Deploying OpenObserve Collector..."
 COLLECTOR_YAML=$(cat <<EOF
