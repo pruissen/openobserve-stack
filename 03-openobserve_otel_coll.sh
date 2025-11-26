@@ -257,23 +257,7 @@ spec:
     helm:
       values: |
         k8sCluster: "microk8s-cluster"
-        # Disable embedded operator to avoid conflicts
-        opentelemetry-operator:
-          enabled: false
-        # Explicitly Enable Health Check Extension to satisfy Probes
-        config:
-          extensions:
-            health_check:
-              endpoint: "0.0.0.0:13133"
-          service:
-            extensions: [health_check]
-            telemetry:
-              logs:
-                level: "debug"
-              metrics:
-                level: none
-                address: null
-
+        
         exporters:
           "otlphttp/openobserve":
             endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
