@@ -256,8 +256,7 @@ spec:
     targetRevision: 0.4.0
     helm:
       values: |
-        k8sCluster: "microk8s-cluster"
-        
+        k8sCluster: "microk8s-cluster"        
         exporters:
           "otlphttp/openobserve":
             endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
