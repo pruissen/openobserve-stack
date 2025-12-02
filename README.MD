@@ -2,6 +2,8 @@
 
 A fully declarative, modular automation suite to deploy a High-Availability Observability stack on a local Microk8s cluster using Terraform and GitOps principles (ArgoCD).
 
+![Screenshot of OpenObserve](images/openobserve.png)
+
 ## 🏗 Architecture
 
 * **Orchestration**: Microk8s (Kubernetes), ArgoCD (GitOps Controller)

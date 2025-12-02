@@ -1,4 +1,3 @@
-
 # ============================================================================
 # 1. NAMESPACES
 # ============================================================================
@@ -59,35 +58,26 @@ resource "helm_release" "argocd" {
   create_namespace = true
   version          = "7.7.0"
 
-  # Using 'values' YAML avoids the 'set' block errors and is cleaner for multiple values
   values = [
     <<-EOT
     server:
       service:
         type: ClusterIP
       replicas: 1
-      # Only use secure (HTTPS) mode
       extraArgs:
         - --insecure=false
-    
     controller:
       replicas: 1
-    
     repoServer:
       replicas: 1
-    
     applicationSet:
       replicas: 1
-    
     redis-ha:
       enabled: false
-    
     redis:
       enabled: true
-      
     configs:
       params:
-        # Explicitly ensure insecure is false (default is false, but for clarity)
         server.insecure: "false"
     EOT
   ]
@@ -171,9 +161,11 @@ spec:
   source:
     repoURL: https://charts.openobserve.ai
     chart: openobserve
-    targetRevision: 0.16.2
+    targetRevision: 0.20.1
     helm:
       values: |
+        postgresql:
+          enabled: false
         statefulSet:
           enabled: true
           replicas: 2 
@@ -182,6 +174,7 @@ spec:
           ZO_S3_BUCKET_NAME: 'openobserve-data'
           ZO_S3_REGION_NAME: 'eu-central-1'
           ZO_HA_MODE: 'true'
+          ZO_META_STORE: 'etcd'
         extraEnv:
           - name: ZO_ROOT_USER_EMAIL
             valueFrom:
@@ -249,6 +242,49 @@ YAML
   depends_on = [helm_release.argocd]
 }
 
+# --- ADDED PROMETHEUS OPERATOR (CRDs) ---
+resource "kubectl_manifest" "prometheus_operator" {
+    yaml_body = <<YAML
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-operator
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 61.3.2
+    helm:
+      values: |
+        defaultRules:
+          create: false
+        alertmanager:
+          enabled: false
+        grafana:
+          enabled: false
+        prometheus:
+          enabled: false
+        nodeExporter:
+          enabled: false
+        prometheusOperator:
+          enabled: true
+          tls:
+            enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openobserve-collector-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+YAML
+  depends_on = [helm_release.argocd]
+}
+
 resource "kubectl_manifest" "otel_operator" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -281,5 +317,44 @@ spec:
     syncOptions:
       - ServerSideApply=true
 YAML
-  depends_on = [kubectl_manifest.cert_manager]
+  # Depends on cert-manager AND prometheus-operator (for ServiceMonitor CRDs)
+  depends_on = [kubectl_manifest.cert_manager, kubectl_manifest.prometheus_operator]
+}
+
+resource "kubectl_manifest" "openobserve_collector" {
+    yaml_body = <<YAML
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: openobserve-collector
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.openobserve.ai
+    chart: openobserve-collector
+    targetRevision: 0.6.0
+    helm:
+      values: |
+        k8sCluster: "microk8s-cluster"
+        exporters:
+          "otlphttp/openobserve":
+            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
+            headers:
+              Authorization: "Basic $ZO_AUTH_TOKEN"
+          "otlphttp/openobserve_k8s_events":
+            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
+            headers:
+              Authorization: "Basic $ZO_AUTH_TOKEN"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: openobserve-collector-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+YAML
+  depends_on = [kubectl_manifest.openobserve]
 }
