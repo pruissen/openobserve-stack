@@ -1,3 +1,22 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 2.16"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.30"
+    }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = ">= 1.14.0"
+    }
+  }
+}
+
 # ============================================================================
 # 1. NAMESPACES
 # ============================================================================
@@ -161,6 +180,7 @@ spec:
   source:
     repoURL: https://charts.openobserve.ai
     chart: openobserve
+    # Chart Version 0.20.1 maps to AppVersion v0.20.1 (Enterprise Ready)
     targetRevision: 0.20.1
     helm:
       values: |
@@ -242,7 +262,6 @@ YAML
   depends_on = [helm_release.argocd]
 }
 
-# --- ADDED PROMETHEUS OPERATOR (CRDs) ---
 resource "kubectl_manifest" "prometheus_operator" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -317,7 +336,6 @@ spec:
     syncOptions:
       - ServerSideApply=true
 YAML
-  # Depends on cert-manager AND prometheus-operator (for ServiceMonitor CRDs)
   depends_on = [kubectl_manifest.cert_manager, kubectl_manifest.prometheus_operator]
 }
 
@@ -333,7 +351,8 @@ spec:
   source:
     repoURL: https://charts.openobserve.ai
     chart: openobserve-collector
-    targetRevision: 0.6.0
+    # Chart Version 0.4.1 (AppVersion 0.136.0) as requested
+    targetRevision: 0.4.1
     helm:
       values: |
         k8sCluster: "microk8s-cluster"
