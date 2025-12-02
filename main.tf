@@ -1,4 +1,3 @@
-
 # ============================================================================
 # 1. NAMESPACES
 # ============================================================================
@@ -88,6 +87,7 @@ resource "helm_release" "argocd" {
 # 4. GITOPS APPLICATIONS
 # ============================================================================
 
+# --- CLOUDNATIVE-PG (Updated to use Raw Manifest via Git) ---
 resource "kubectl_manifest" "cnpg" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -98,9 +98,11 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://cloudnative-pg.github.io/charts
-    chart: cloudnative-pg
-    targetRevision: 0.22.0
+    # We point directly to the git repo and the 'releases' folder
+    # which contains the cnpg-1.22.1.yaml file.
+    repoURL: https://github.com/cloudnative-pg/cloudnative-pg
+    targetRevision: release-1.22
+    path: releases
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system
@@ -244,7 +246,7 @@ YAML
   depends_on = [helm_release.argocd]
 }
 
-# --- PROMETHEUS CRDS (Updated to v25.0.0) ---
+# --- PROMETHEUS CRDS (v25.0.0) ---
 resource "kubectl_manifest" "prometheus_crds" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -257,9 +259,7 @@ spec:
   source:
     repoURL: https://prometheus-community.github.io/helm-charts
     chart: prometheus-operator-crds
-    # Using the specific chart version you requested
     targetRevision: 25.0.0
-    # No values needed; this chart only installs CRDs
   destination:
     server: https://kubernetes.default.svc
     namespace: openobserve-collector-system
@@ -306,7 +306,6 @@ spec:
     syncOptions:
       - ServerSideApply=true
 YAML
-  # Updated dependency to point to the new CRD resource
   depends_on = [kubectl_manifest.cert_manager, kubectl_manifest.prometheus_crds]
 }
 
@@ -322,7 +321,7 @@ spec:
   source:
     repoURL: https://charts.openobserve.ai
     chart: openobserve-collector
-    # Chart Version 0.4.1 (AppVersion 0.136.0) as requested
+    # Chart Version 0.4.1 (AppVersion 0.136.0)
     targetRevision: 0.4.1
     helm:
       values: |
