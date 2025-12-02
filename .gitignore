@@ -43,3 +43,4 @@ Thumbs.db
 # Kubernetes Config (if you copied it locally)
 config
 kubeconfig
+.terraform.lock.hcl
