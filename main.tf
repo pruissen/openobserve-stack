@@ -244,35 +244,22 @@ YAML
   depends_on = [helm_release.argocd]
 }
 
-resource "kubectl_manifest" "prometheus_operator" {
+# --- PROMETHEUS CRDS (Updated to v25.0.0) ---
+resource "kubectl_manifest" "prometheus_crds" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: prometheus-operator
+  name: prometheus-operator-crds
   namespace: argocd
 spec:
   project: default
   source:
     repoURL: https://prometheus-community.github.io/helm-charts
-    chart: kube-prometheus-stack
-    targetRevision: 61.3.2
-    helm:
-      values: |
-        defaultRules:
-          create: false
-        alertmanager:
-          enabled: false
-        grafana:
-          enabled: false
-        prometheus:
-          enabled: false
-        nodeExporter:
-          enabled: false
-        prometheusOperator:
-          enabled: true
-          tls:
-            enabled: false
+    chart: prometheus-operator-crds
+    # Using the specific chart version you requested
+    targetRevision: 25.0.0
+    # No values needed; this chart only installs CRDs
   destination:
     server: https://kubernetes.default.svc
     namespace: openobserve-collector-system
@@ -282,6 +269,7 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+      - Replace=true
 YAML
   depends_on = [helm_release.argocd]
 }
@@ -318,7 +306,8 @@ spec:
     syncOptions:
       - ServerSideApply=true
 YAML
-  depends_on = [kubectl_manifest.cert_manager, kubectl_manifest.prometheus_operator]
+  # Updated dependency to point to the new CRD resource
+  depends_on = [kubectl_manifest.cert_manager, kubectl_manifest.prometheus_crds]
 }
 
 resource "kubectl_manifest" "openobserve_collector" {
