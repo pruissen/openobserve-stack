@@ -56,7 +56,8 @@ resource "helm_release" "argocd" {
   chart            = "argo-cd"
   namespace        = "argocd"
   create_namespace = true
-  version          = "7.7.0"
+  # Updated to the specific version requested
+  version          = "9.1.5"
 
   values = [
     <<-EOT
@@ -87,7 +88,7 @@ resource "helm_release" "argocd" {
 # 4. GITOPS APPLICATIONS
 # ============================================================================
 
-# --- CLOUDNATIVE-PG (Updated to use Raw Manifest via Git) ---
+# --- CLOUDNATIVE-PG (Raw Manifest via Git) ---
 resource "kubectl_manifest" "cnpg" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -98,8 +99,6 @@ metadata:
 spec:
   project: default
   source:
-    # We point directly to the git repo and the 'releases' folder
-    # which contains the cnpg-1.22.1.yaml file.
     repoURL: https://github.com/cloudnative-pg/cloudnative-pg
     targetRevision: release-1.22
     path: releases
