@@ -7,8 +7,10 @@ A fully declarative, modular automation suite to deploy a High-Availability Obse
 ## 🏗 Architecture
 
 * **Orchestration**: Microk8s (Kubernetes), ArgoCD (GitOps Controller)
-* **Storage**: MinIO (S3-compatible Object Storage), Etcd (Meta store), CloudNativePG (PostgreSQL - Optional)
-* **Observability Backend**: OpenObserve (HA Mode v0.20.1)
+* **Storage**: 
+    * **Object Store**: MinIO (S3-compatible)
+    * **Metadata Store**: PostgreSQL (via CloudNativePG Operator)
+* **Observability Backend**: OpenObserve (HA Mode v0.20.1 - Enterprise Ready)
 * **Collection**: Cert Manager, OpenTelemetry Collector, Prometheus Operator (CRDs)
 * **Infrastructure as Code**: Terraform + Helm
 
@@ -19,9 +21,9 @@ A fully declarative, modular automation suite to deploy a High-Availability Obse
 * **Tools**:
     * `terraform` (>= 1.0)
     * `kubectl`
-    * `make` (Optional, for easy commands)
+    * `make` (Required for workflow management)
 
-## 🚀 Quick Start
+## 🚀 Quick Start Guide
 
 ### 1. Prepare Microk8s
 Ensure your cluster is running and the config is exported where Terraform can find it.
@@ -39,29 +41,31 @@ microk8s config > ~/.kube/config
 chmod 600 ~/.kube/config
 ```
 
-### 2. Deployment
-We use a Makefile to simplify the Terraform workflow.
+### 2. Deploy Core Infrastructure
+This installs ArgoCD, MinIO, CloudNativePG, and OpenObserve.
 
 ```bash
-# Initialize Terraform and download providers
+# Initialize
 make init
 
-# Plan, Apply, and Show Credentials (The "Do It All" command)
-make up
+# Plan (Preview changes)
+make plan
+
+# Apply (Deploy)
+make apply
 ```
 
-**Note:** You can customize the root password by passing environment variables:
+### 3. Access & Configuration (Manual Step)
+Terraform runs locally, so we use a script to manage port-forwards.
 
+**A. Start Access:**
 ```bash
-make up ZO_ROOT_PASSWORD="MySecretPassword!"
+make start
 ```
 
-### 3. Accessing the UI
-Terraform runs locally, so port-forwarding is handled via a helper command.
-
+**B. Get Credentials:**
 ```bash
-# Start background port-forwards for ArgoCD, OpenObserve, and MinIO
-make port-forward
+make info
 ```
 
 | Service | URL | User | Password |
@@ -70,52 +74,58 @@ make port-forward
 | **OpenObserve** | `http://127.0.0.1:5080` | `admin@example.com` | Run `make info` |
 | **MinIO Console** | `http://127.0.0.1:9001` | `minioadmin` | Run `make info` |
 
-To see the passwords at any time:
+**C. Create Organization (IMPORTANT):**
+1. Open `http://127.0.0.1:5080` in your browser.
+2. Login with the credentials from `make info`.
+3. Go to **Settings** -> **Organizations**.
+4. Create a new organization named **`observability_team`**.
+   *(This is required before the Collectors can push data).*
+
+### 4. Deploy Collectors
+Once the Core is running and the Organization exists, deploy the OpenTelemetry Collectors.
+
 ```bash
-make info
+# Plan Collectors
+make plan-collectors
+
+# Apply Collectors
+make apply-collectors
 ```
 
 ## 📂 Project Structure
 
-* `main.tf`: Core logic. Installs namespaces, Secrets, ArgoCD, and the App-of-Apps (Manifests).
-* `providers.tf`: Configuration for Kubernetes, Helm, and Kubectl providers.
-* `iam.tf`: Configures OpenObserve Organizations via API after deployment.
-* `variables.tf`: Default settings for user/pass/orgs.
-* `Makefile`: Shortcut commands for the workflow.
+```text
+.
+├── main.tf              # Core Infra (Argo, MinIO, OpenObserve, Postgres, CertManager)
+├── variables.tf         # Core Configuration
+├── providers.tf         # Terraform Providers
+├── Makefile             # Workflow Automation
+├── manage.sh            # Port-forwarding & Credential extraction script
+└── collectors/          # Sub-module for Agents
+    ├── main.tf          # OTel Operator & Collector Deployments
+    └── providers.tf     # Collector Providers
+```
 
 ## 🛠 Configuration Details
 
 ### OpenObserve v0.20.1
 * **HA Mode**: Enabled (2 Replicas).
-* **Meta Store**: Configured to use Etcd (bundled) to avoid conflicts with Postgres.
-* **Storage**: Uses MinIO as the S3 backend.
+* **Meta Store**: **PostgreSQL** (Managed by CloudNativePG Operator).
+* **Storage**: MinIO (S3).
+
+### CloudNativePG
+* **Version**: v1.22.1
+* **Deployment**: Installed via raw manifest from the official repository to support the Operator lifecycle.
 
 ### ArgoCD
-* **Secure Mode**: HTTPS is enabled (self-signed).
-* **Resource Tweak**: Tuned for local development (Low replicas, High Availability Redis disabled).
-* **Namespace**: `argocd`.
+* **Version**: v9.1.5
+* **Mode**: Secure (HTTPS enabled).
 
 ## 🧹 Cleanup
 
-To remove the entire stack:
+To remove the entire stack (Collectors + Core):
 
 ```bash
 make clean
 ```
-*This runs `terraform destroy` and kills any background port-forwarding processes.*
-
-## ⚠️ Troubleshooting
-
-**Terraform Lock Error?**
-If `terraform init` fails due to lock file changes across OS versions:
-```bash
-rm .terraform.lock.hcl
-terraform init -upgrade
-```
-
-**Port Forward Fails?**
-Ensure no other process is using ports 8443, 5080, or 9001.
-```bash
-pkill -f "kubectl port-forward"
-make port-forward
-```
+*This stops port-forwards and destroys all Terraform resources in the correct order.*
