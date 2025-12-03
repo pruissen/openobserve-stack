@@ -1,72 +1,70 @@
 # Makefile for OpenObserve Stack
-
-# Default variables
 TF_FLAGS = -var="zo_root_password=$(ZO_ROOT_PASSWORD)"
-KUBECTL_CMD = kubectl
-
-# Defaults if not provided
 ZO_ROOT_PASSWORD ?= ComplexPassword123!
 
-.PHONY: help init plan apply destroy info port-forward clean
+.PHONY: help init plan apply plan-collectors apply-collectors start stop info clean
 
-help: ## Show this help message
-	@echo "Usage: make [target]"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+help: ## Show help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-init: ## Initialize Terraform
+# --- CORE INFRASTRUCTURE ---
+
+init: ## Initialize Core Terraform
 	terraform init
 
-plan: ## Plan the deployment
-	terraform plan -out=tfplan $(TF_FLAGS)
+plan: init ## Generate execution plan for Core Infra
+	@echo "Planning Core Infrastructure..."
+	terraform plan -out=core.tfplan $(TF_FLAGS)
+	@echo "---------------------------------------------------"
+	@echo "Plan saved to 'core.tfplan'. Run 'make apply' to deploy."
 
-apply: ## Apply the deployment
-	terraform apply tfplan
+apply: ## Apply Core Infra (Requires 'make plan' first)
+	@echo "Applying Core Infrastructure..."
+	terraform apply core.tfplan
+	@rm core.tfplan
 
-up: init plan apply info ## Run init, plan, apply, and show info
+# --- COLLECTORS (Run after Core is ready) ---
 
-destroy: ## Destroy all resources (Cleanup)
-	@echo "destroying infrastructure..."
+init-collectors:
+	cd collectors && terraform init
+
+plan-collectors: init-collectors ## Generate execution plan for Collectors
+	@echo "Planning Collectors..."
+	cd collectors && terraform plan -out=collectors.tfplan
+	@echo "---------------------------------------------------"
+	@echo "Plan saved to 'collectors/collectors.tfplan'. Run 'make apply-collectors' to deploy."
+
+apply-collectors: ## Apply Collectors (Requires 'make plan-collectors' first)
+	@echo "Applying Collectors..."
+	cd collectors && terraform apply collectors.tfplan
+	@rm collectors/collectors.tfplan
+
+# --- MANAGEMENT ---
+
+start: ## Start Port Forwards (Background)
+	@chmod +x manage.sh
+	@./manage.sh start
+
+stop: ## Stop Port Forwards
+	@chmod +x manage.sh
+	@./manage.sh stop
+
+restart: ## Restart Port Forwards
+	@chmod +x manage.sh
+	@./manage.sh restart
+
+info: ## Show Service Credentials and URLs
+	@chmod +x manage.sh
+	@./manage.sh info
+
+# --- CLEANUP ---
+
+clean: ## Destroy Everything (Core + Collectors)
+	@echo "Stopping port-forwards..."
+	@./manage.sh stop
+	@echo "Destroying Collectors..."
+	cd collectors && terraform destroy -auto-approve || true
+	@echo "Destroying Core Infrastructure..."
 	terraform destroy -auto-approve $(TF_FLAGS)
-	@echo "Cleaning up local port-forward processes..."
-	@pkill -f "kubectl port-forward" || true
-
-clean: destroy ## Alias for destroy
-
-info: ## Show URLs and Credentials
-	@echo ""
-	@echo "=================================================================="
-	@echo "ACCESS INFORMATION"
-	@echo "=================================================================="
-	@echo ""
-	@echo "1. ArgoCD (Secure Mode Enabled)"
-	@echo "   URL:  https://127.0.0.1:8443"
-	@echo "   User: admin"
-	@echo -n "   Pass: "
-	@$(KUBECTL_CMD) -n argocd get secret argocd-initial-admin-secret -o go-template='{{.data.password | base64decode}}' 2>/dev/null || echo "Not found"
-	@echo ""
-	@echo ""
-	@echo "2. OpenObserve"
-	@echo "   URL:  http://127.0.0.1:5080"
-	@echo -n "   User: "
-	@$(KUBECTL_CMD) -n openobserve-system get secret openobserve-creds -o go-template='{{.data.ZO_ROOT_USER_EMAIL | base64decode}}' 2>/dev/null || echo "Not found"
-	@echo -n "   Pass: "
-	@$(KUBECTL_CMD) -n openobserve-system get secret openobserve-creds -o go-template='{{.data.ZO_ROOT_USER_PASSWORD | base64decode}}' 2>/dev/null || echo "Not found"
-	@echo ""
-	@echo ""
-	@echo "3. MinIO"
-	@echo "   URL:  http://127.0.0.1:9001"
-	@echo -n "   User: "
-	@$(KUBECTL_CMD) -n minio-system get secret minio-creds -o go-template='{{.data.rootUser | base64decode}}' 2>/dev/null || echo "Not found"
-	@echo -n "   Pass: "
-	@$(KUBECTL_CMD) -n minio-system get secret minio-creds -o go-template='{{.data.rootPassword | base64decode}}' 2>/dev/null || echo "Not found"
-	@echo ""
-	@echo "=================================================================="
-
-port-forward: ## Start background port-forwards
-	@echo "Starting port-forwards in background..."
-	@pkill -f "kubectl port-forward" || true
-	# Note: argocd namespace used here
-	@nohup $(KUBECTL_CMD) port-forward svc/argocd-server -n argocd 8443:443 >/dev/null 2>&1 &
-	@nohup $(KUBECTL_CMD) port-forward svc/openobserve-router -n openobserve-system 5080:5080 >/dev/null 2>&1 &
-	@nohup $(KUBECTL_CMD) port-forward svc/minio-console -n minio-system 9001:9001 >/dev/null 2>&1 &
-	@echo "Ports opened: ArgoCD(8443), OpenObserve(5080), MinIO(9001)"
+	@echo "Cleaning up plan files..."
+	@rm -f core.tfplan collectors/collectors.tfplan

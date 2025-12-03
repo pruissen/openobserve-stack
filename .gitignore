@@ -44,3 +44,4 @@ Thumbs.db
 config
 kubeconfig
 .terraform.lock.hcl
+core.tfplan

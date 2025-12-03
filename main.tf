@@ -1,3 +1,4 @@
+
 # ============================================================================
 # 1. NAMESPACES
 # ============================================================================
@@ -56,7 +57,6 @@ resource "helm_release" "argocd" {
   chart            = "argo-cd"
   namespace        = "argocd"
   create_namespace = true
-  # Updated to the specific version requested
   version          = "9.1.5"
 
   values = [
@@ -88,7 +88,8 @@ resource "helm_release" "argocd" {
 # 4. GITOPS APPLICATIONS
 # ============================================================================
 
-# --- CLOUDNATIVE-PG (Raw Manifest via Git) ---
+# --- CLOUDNATIVE-PG ---
+# Installs the Operator needed by OpenObserve's Postgres Cluster
 resource "kubectl_manifest" "cnpg" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -102,6 +103,9 @@ spec:
     repoURL: https://github.com/cloudnative-pg/cloudnative-pg
     targetRevision: release-1.22
     path: releases
+    # Explicitly select the v1.22.1 manifest to avoid file size errors
+    directory:
+      include: 'cnpg-1.22.1.yaml'
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system
@@ -115,6 +119,7 @@ YAML
   depends_on = [helm_release.argocd]
 }
 
+# --- MINIO ---
 resource "kubectl_manifest" "minio" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -151,6 +156,8 @@ YAML
   depends_on = [helm_release.argocd, kubernetes_secret.minio_creds]
 }
 
+# --- OPENOBSERVE ---
+# Configured to use Postgres (via CNPG) for Metadata
 resource "kubectl_manifest" "openobserve" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -163,21 +170,29 @@ spec:
   source:
     repoURL: https://charts.openobserve.ai
     chart: openobserve
-    # Chart Version 0.20.1 maps to AppVersion v0.20.1 (Enterprise Ready)
     targetRevision: 0.20.1
     helm:
       values: |
+        # ENABLE POSTGRES: This tells the chart to create a Cluster resource
+        # which the CNPG Operator (installed above) will fulfill.
         postgresql:
+          enabled: true
+        
+        # DISABLE ETCD: We are switching to Postgres for metadata
+        etcd:
           enabled: false
+
         statefulSet:
           enabled: true
           replicas: 2 
+        
         config:
           ZO_S3_SERVER_URL: 'http://minio.minio-system.svc:9000'
           ZO_S3_BUCKET_NAME: 'openobserve-data'
           ZO_S3_REGION_NAME: 'eu-central-1'
           ZO_HA_MODE: 'true'
-          ZO_META_STORE: 'etcd'
+          # ZO_META_STORE defaults to 'db' (Postgres) when not set to 'etcd'
+
         extraEnv:
           - name: ZO_ROOT_USER_EMAIL
             valueFrom:
@@ -199,12 +214,6 @@ spec:
               secretKeyRef:
                 name: openobserve-creds
                 key: ZO_S3_SECRET_KEY
-        etcd:
-          enabled: true
-          replicaCount: 1
-          auth:
-            rbac:
-              create: false
   destination:
     server: https://kubernetes.default.svc
     namespace: openobserve-system
@@ -212,10 +221,23 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      # Validate=false allows Argo to sync the App even if the CNPG CRDs
+      # are not fully registered by Kubernetes yet.
+      - Validate=false
+      - CreateNamespace=true
 YAML
-  depends_on = [helm_release.argocd, kubernetes_secret.openobserve_creds]
+  
+  # Strict dependency: CNPG Operator must be installed first
+  depends_on = [
+    helm_release.argocd, 
+    kubernetes_secret.openobserve_creds,
+    kubectl_manifest.cnpg
+  ]
 }
 
+# --- CERT MANAGER ---
 resource "kubectl_manifest" "cert_manager" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -245,7 +267,8 @@ YAML
   depends_on = [helm_release.argocd]
 }
 
-# --- PROMETHEUS CRDS (v25.0.0) ---
+# --- PROMETHEUS CRDS ---
+# Requisite for the OTel Operator (installed separately in collectors/ module)
 resource "kubectl_manifest" "prometheus_crds" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -271,78 +294,4 @@ spec:
       - Replace=true
 YAML
   depends_on = [helm_release.argocd]
-}
-
-resource "kubectl_manifest" "otel_operator" {
-    yaml_body = <<YAML
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: opentelemetry-operator
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
-    chart: opentelemetry-operator
-    targetRevision: 0.74.0
-    helm:
-      values: |
-        manager:
-          collectorImage:
-            repository: "otel/opentelemetry-collector-contrib"
-            tag: "0.111.0"
-        admissionWebhooks:
-          certManager:
-            enabled: true
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: opentelemetry-operator-system
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - ServerSideApply=true
-YAML
-  depends_on = [kubectl_manifest.cert_manager, kubectl_manifest.prometheus_crds]
-}
-
-resource "kubectl_manifest" "openobserve_collector" {
-    yaml_body = <<YAML
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: openobserve-collector
-  namespace: argocd
-spec:
-  project: default
-  source:
-    repoURL: https://charts.openobserve.ai
-    chart: openobserve-collector
-    # Chart Version 0.4.1 (AppVersion 0.136.0)
-    targetRevision: 0.4.1
-    helm:
-      values: |
-        k8sCluster: "microk8s-cluster"
-        exporters:
-          "otlphttp/openobserve":
-            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
-            headers:
-              Authorization: "Basic $ZO_AUTH_TOKEN"
-          "otlphttp/openobserve_k8s_events":
-            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
-            headers:
-              Authorization: "Basic $ZO_AUTH_TOKEN"
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: openobserve-collector-system
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - ServerSideApply=true
-YAML
-  depends_on = [kubectl_manifest.openobserve]
 }
