@@ -1,131 +1,88 @@
-# OpenObserve HA Stack on Microk8s (Terraform + ArgoCD)
-
-A fully declarative, modular automation suite to deploy a High-Availability Observability stack on a local Microk8s cluster using Terraform and GitOps principles (ArgoCD).
+# OpenObserve HA Stack: Production in a Box
 
 ![Screenshot of OpenObserve](images/openobserve.png)
 
-## 🏗 Architecture
+> **⚠️ DISCLAIMER: WORK IN PROGRESS (Target: KubeCon 2026)**
+> This is a Pre-Alpha Proof of Concept. Security settings are relaxed for local demonstration. API contracts are subject to change.
 
-* **Orchestration**: Microk8s (Kubernetes), ArgoCD (GitOps Controller)
-* **Storage**: 
-    * **Object Store**: MinIO (S3-compatible)
-    * **Metadata Store**: PostgreSQL (via CloudNativePG Operator)
-* **Observability Backend**: OpenObserve (HA Mode v0.20.1 - Enterprise Ready)
-* **Collection**: Cert Manager, OpenTelemetry Collector, Prometheus Operator (CRDs)
-* **Infrastructure as Code**: Terraform + Helm
+## 🎯 Introduction & Goal
 
-## 📋 Prerequisites
+Most local observability stacks are "toys"—single containers that bear no resemblance to production.
 
-* **OS**: Ubuntu Linux or macOS (Intel/Apple Silicon)
-* **Microk8s**: Installed and running (See setup below)
-* **Tools**:
-    * `terraform` (>= 1.0)
-    * `kubectl`
-    * `make` (Required for workflow management)
+**The Goal:** Prove that you can run a **High-Availability, Multi-Tenant Observability stack** on a laptop using the exact same toolchain used in enterprise clusters.
 
-## 🚀 Quick Start Guide
+This demo uses **Terraform** to bootstrap **ArgoCD**, which then manages complex stateful workloads (PostgreSQL/MinIO Operators) and **OpenObserve HA**, while a custom **Python** layer automates multi-tenant onboarding.
 
-### 1. Prepare Microk8s
-Ensure your cluster is running and the config is exported where Terraform can find it.
+## 🏗 Tech Stack
+* **Orchestration:** Microk8s & ArgoCD (GitOps)
+* **Backing Services:** MinIO (S3) & CloudNativePG (PostgreSQL)
+* **Observability:** OpenObserve (HA Mode)
+* **Automation:** Terraform & Python (`o2_manager.py`)
+
+## ⚡ Quick Start
+
+### 1. Prerequisites
+* **Microk8s** (Running with `dns`, `helm3`, `storage` enabled)
+* **Terraform** (>= 1.0) & **Python 3**
+* **Make**
+
+### 2. Cluster Prep
+Export your Microk8s config so Terraform can access the cluster.
 
 ```bash
-# Wait for cluster
-microk8s status --wait-ready
-
-# Enable required addons
-microk8s enable dns helm3 storage
-
-# Export config for Terraform
 mkdir -p ~/.kube
 microk8s config > ~/.kube/config
 chmod 600 ~/.kube/config
 ```
 
-### 2. Deploy Core Infrastructure
-This installs ArgoCD, MinIO, CloudNativePG, and OpenObserve.
+### 3. Deploy Core Infrastructure
+Initialize Terraform and deploy the core services (ArgoCD, MinIO, DB, OpenObserve).
 
 ```bash
-# Initialize
 make init
-
-# Plan (Preview changes)
-make plan
-
-# Apply (Deploy)
 make apply
 ```
 
-### 3. Access & Configuration (Manual Step)
-Terraform runs locally, so we use a script to manage port-forwards.
+### 4. Connect & Bootstrap
+Establish local port-forwards and use the Python automation to create Organizations, Service Accounts, and Roles.
 
-**A. Start Access:**
 ```bash
-make start
+# 1. Open tunnels to the cluster
+./manage-local-connection.sh start
+
+# 2. Bootstrap Tenants (creates orgs: platform, team1, team2)
+python3 o2_manager.py bootstrap
 ```
 
-**B. Get Credentials:**
+### 5. Access Credentials
+Retrieve generated passwords for ArgoCD, MinIO, and OpenObserve.
+
 ```bash
-make info
+./manage-local-connection.sh info
 ```
 
-| Service | URL | User | Password |
-| :--- | :--- | :--- | :--- |
-| **ArgoCD** | `https://127.0.0.1:8443` | `admin` | Run `make info` |
-| **OpenObserve** | `http://127.0.0.1:5080` | `admin@example.com` | Run `make info` |
-| **MinIO Console** | `http://127.0.0.1:9001` | `minioadmin` | Run `make info` |
-
-**C. Create Organization (IMPORTANT):**
-1. Open `http://127.0.0.1:5080` in your browser.
-2. Login with the credentials from `make info`.
-3. Go to **Settings** -> **Organizations**.
-4. Create a new organization named **`observability_team`**.
-   *(This is required before the Collectors can push data).*
-
-### 4. Deploy Collectors
-Once the Core is running and the Organization exists, deploy the OpenTelemetry Collectors.
+### 6. Deploy Collectors
+Now that tenants exist, deploy the OpenTelemetry Collectors.
 
 ```bash
-# Plan Collectors
-make plan-collectors
-
-# Apply Collectors
 make apply-collectors
 ```
 
-## 📂 Project Structure
+---
 
-```text
-.
-├── main.tf              # Core Infra (Argo, MinIO, OpenObserve, Postgres, CertManager)
-├── variables.tf         # Core Configuration
-├── providers.tf         # Terraform Providers
-├── Makefile             # Workflow Automation
-├── manage.sh            # Port-forwarding & Credential extraction script
-└── collectors/          # Sub-module for Agents
-    ├── main.tf          # OTel Operator & Collector Deployments
-    └── providers.tf     # Collector Providers
-```
+## 🧠 Automation Reference
 
-## 🛠 Configuration Details
+We use `o2_manager.py` to handle API logic that Terraform cannot (dynamic tokens, internal O2 resources).
 
-### OpenObserve v0.20.1
-* **HA Mode**: Enabled (2 Replicas).
-* **Meta Store**: **PostgreSQL** (Managed by CloudNativePG Operator).
-* **Storage**: MinIO (S3).
+* `bootstrap`: Sets up default Orgs, Streams, Roles, and Service Accounts.
+* `show-all`: Dumps a JSON overview of the entire multi-tenant landscape.
+* `cleanup-all`: **Destructive**. Purges all resources inside organizations.
 
-### CloudNativePG
-* **Version**: v1.22.1
-* **Deployment**: Installed via raw manifest from the official repository to support the Operator lifecycle.
+## 📂 Structure
+* `main.tf`: Core Infrastructure (Argo/O2/MinIO)
+* `collectors/`: OTel Collector configurations
+* `o2_manager.py`: Multi-tenant API automation
+* `manage-local-connection.sh`: Connectivity helper
 
-### ArgoCD
-* **Version**: v9.1.5
-* **Mode**: Secure (HTTPS enabled).
-
-## 🧹 Cleanup
-
-To remove the entire stack (Collectors + Core):
-
-```bash
-make clean
-```
-*This stops port-forwards and destroys all Terraform resources in the correct order.*
+## 📄 License
+Licensed under the Apache License, Version 2.0.

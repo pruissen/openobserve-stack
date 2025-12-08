@@ -80,7 +80,7 @@ case "$CMD" in
         show_info
         ;;
     *)
-        echo "Usage: ./manage.sh [start|stop|restart|info]"
+        echo "Usage: ./manage-local-connection.sh [start|stop|restart|info]"
         exit 1
         ;;
 esac
