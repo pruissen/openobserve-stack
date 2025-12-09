@@ -250,10 +250,26 @@ def ensure_user(org, email, role):
     except Exception as e:
         return {"email": email, "status": f"Conn Error: {e}"}
 
+def get_service_account_token(org, email):
+    """Fetches the token for an existing service account."""
+    url = f"{O2_URL}/api/{org}/service_accounts/{email}"
+    try:
+        r = requests.get(url, auth=get_auth())
+        if r.status_code == 200:
+            data = r.json()
+            # The token is usually under 'data' -> 'token' or directly in 'token'
+            # Adjust based on exact API response. Assuming standard structure:
+            if 'data' in data:
+                return data['data'].get('token')
+            return data.get('token')
+        return None
+    except:
+        return None
+
 def ensure_service_account(org, name, role="admin"):
     url = f"{O2_URL}/api/{org}/service_accounts"
     
-    sa_email = f"{name}@{org}.serviceaccount"
+    sa_email = f"{name}-{org}@example.com"
     
     payload = {
         "name": name, 
@@ -261,26 +277,36 @@ def ensure_service_account(org, name, role="admin"):
         "role": role
     }
     
+    # 1. Create or Check Existence
     try:
+        created = False
+        
+        # Check existing list
         existing = get_org_service_accounts(org)
-        for sa in existing:
-            if sa.get('name') == name:
-                 return {"name": name, "status": "Exists (Credentials Hidden)"}
+        exists = any(sa.get('name') == name for sa in existing)
 
-        r = requests.post(url, auth=get_auth(), json=payload)
-        success, msg = check_response(r, f"Create Service Account {name}")
-        if success:
-            data = r.json()
-            creds = data.get('data', data)
-            return {
+        if not exists:
+            r = requests.post(url, auth=get_auth(), json=payload)
+            success, msg = check_response(r, f"Create Service Account {name}")
+            if success:
+                created = True
+            else:
+                return {"name": name, "status": f"Failed: {msg}"}
+        
+        # 2. Retrieve Token
+        # Now that it exists (or we just created it), fetch the detailed info to get the Token
+        token = get_service_account_token(org, sa_email)
+        
+        if token:
+             return {
                 "name": name, 
                 "email": sa_email,
-                "status": "Created",
-                "client_id": creds.get('client_id'),
-                "client_secret": creds.get('client_secret')
+                "status": "Created" if created else "Exists",
+                "token": token
             }
         else:
-            return {"name": name, "status": f"Failed: {msg}"}
+            return {"name": name, "status": "Failed to retrieve Token"}
+
     except Exception as e:
         return {"name": name, "status": f"Conn Error: {e}"}
 
@@ -335,11 +361,11 @@ def clean_org_resources(org_name, no_confirm=False):
     # 1. Delete Service Accounts
     sas = get_org_service_accounts(org_name)
     for sa in sas:
-        sa_name = sa.get('name')
-        if sa_name:
+        target = sa.get('email') or sa.get('name')
+        if target:
             try:
-                requests.delete(f"{O2_URL}/api/{org_name}/service_accounts/{sa_name}", auth=get_auth())
-                print(f"      - Deleted SA: {sa_name}")
+                requests.delete(f"{O2_URL}/api/{org_name}/service_accounts/{target}", auth=get_auth())
+                print(f"      - Deleted SA: {target}")
             except: pass
 
     # 2. Delete Users (Skip Self)
@@ -360,7 +386,6 @@ def clean_org_resources(org_name, no_confirm=False):
             r_name = r
             r_id = r
         else:
-            # Check 'role' first (new schema) then 'name'
             r_name = r.get('role') or r.get('name')
             r_id = r.get('id', r_name)
 

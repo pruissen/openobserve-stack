@@ -1,22 +1,27 @@
 # collectors/main.tf
 
-# 1. READ EXISTING SECRETS (From Core Infra)
-data "kubernetes_secret" "openobserve_creds" {
-  metadata {
-    name      = "openobserve-creds"
-    namespace = "openobserve-system"
-  }
+# 1. READ BOOTSTRAP RESULTS
+data "local_file" "bootstrap_results" {
+  filename = "${path.module}/../bootstrap_results.json"
 }
 
 locals {
-  # Decode secrets to build the auth token
-  zo_user = data.kubernetes_secret.openobserve_creds.data["ZO_ROOT_USER_EMAIL"]
-  zo_pass = data.kubernetes_secret.openobserve_creds.data["ZO_ROOT_USER_PASSWORD"]
-  # Base64 encode User:Pass for Basic Auth
-  zo_auth_token = base64encode("${local.zo_user}:${local.zo_pass}")
+  bootstrap_data = jsondecode(data.local_file.bootstrap_results.content)
+  
+  org_config = [
+    for org in local.bootstrap_data : org
+    if org.org == "platform_kubernetes"
+  ][0]
+
+  sa_creds = [
+    for sa in local.org_config.service_accounts : sa
+    if sa.name == "sa-gitops"
+  ][0]
+
+  sa_auth_token = base64encode("${local.sa_creds.email}:${local.sa_creds.token}")
 }
 
-# 2. OTEL OPERATOR
+# 2. OTEL OPERATOR (Standalone)
 resource "kubectl_manifest" "otel_operator" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -35,10 +40,8 @@ spec:
         manager:
           collectorImage:
             repository: "otel/opentelemetry-collector-contrib"
-            tag: "0.111.0"
-        admissionWebhooks:
-          certManager:
-            enabled: true
+            tag: "0.104.0"
+        # Removed admissionWebhooks settings entirely (Default Fallback)
   destination:
     server: https://kubernetes.default.svc
     namespace: opentelemetry-operator-system
@@ -48,10 +51,29 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+      - CreateNamespace=true
 YAML
 }
 
-# 3. OPENOBSERVE COLLECTOR
+# 3. HEALTH CHECK WAITER
+# This blocks until the Operator is actually ready in the cluster
+resource "null_resource" "wait_for_operator" {
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<EOT
+      echo "⏳ Waiting for Operator Deployment to be created..."
+      until kubectl get deployment -n opentelemetry-operator-system opentelemetry-operator >/dev/null 2>&1; do 
+        sleep 5
+      done
+      
+      echo "⏳ Waiting for Operator to be HEALTHY..."
+      kubectl wait --for=condition=available --timeout=300s deployment/opentelemetry-operator -n opentelemetry-operator-system
+    EOT
+  }
+  depends_on = [kubectl_manifest.otel_operator]
+}
+
+# 4. OPENOBSERVE COLLECTOR (Standalone)
 resource "kubectl_manifest" "openobserve_collector" {
     yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -68,15 +90,26 @@ spec:
     helm:
       values: |
         k8sCluster: "microk8s-cluster"
+        
+        # Disable the bundled operator
+        opentelemetry-operator:
+          enabled: false
+
+        # Compatibility Image
+        image:
+          repository: "otel/opentelemetry-collector-contrib"
+          tag: "0.104.0"
+
+        # Exporter Config
         exporters:
           "otlphttp/openobserve":
-            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
+            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/platform_kubernetes"
             headers:
-              Authorization: "Basic ${local.zo_auth_token}"
+              Authorization: "Basic ${local.sa_auth_token}"
           "otlphttp/openobserve_k8s_events":
-            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/default"
+            endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/platform_kubernetes"
             headers:
-              Authorization: "Basic ${local.zo_auth_token}"
+              Authorization: "Basic ${local.sa_auth_token}"
   destination:
     server: https://kubernetes.default.svc
     namespace: openobserve-collector-system
@@ -86,6 +119,9 @@ spec:
       selfHeal: true
     syncOptions:
       - ServerSideApply=true
+      - CreateNamespace=true
 YAML
-  depends_on = [kubectl_manifest.otel_operator]
+  
+  # Explicitly wait for the health check to pass
+  depends_on = [null_resource.wait_for_operator]
 }
