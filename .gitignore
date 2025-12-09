@@ -46,3 +46,4 @@ kubeconfig
 .terraform.lock.hcl
 core.tfplan
 bootstrap_results.json
+collectors/collectors.tfplan

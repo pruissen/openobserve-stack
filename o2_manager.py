@@ -196,7 +196,6 @@ def ensure_custom_role(org_id, role_name, permissions):
     url = f"{O2_URL}/api/{org_id}/roles"
     
     # FIX: Convert the list of objects to a list of JSON Strings
-    # This satisfies "expected a string" error while passing the complex structure
     permissions_strings = [json.dumps(p) for p in permissions]
     
     payload = {
@@ -290,10 +289,28 @@ def ensure_service_account(org_name, org_id, name, role="admin"):
     try:
         created = False
         
+        # Check existing accounts
         existing = get_org_service_accounts(org_id)
-        exists = any(sa.get('name') == name for sa in existing)
+        existing_sa = next((sa for sa in existing if sa.get('name') == name), None)
 
-        if not exists:
+        if existing_sa:
+            # 1. Update Role if needed
+            current_role = existing_sa.get('role')
+            if current_role != role:
+                print(f"      🔄 Updating SA '{name}' role from '{current_role}' to '{role}'...")
+                # Update requires the email (which serves as ID usually) or the 'id' field
+                sa_id_target = existing_sa.get('email') or existing_sa.get('id')
+                
+                update_url = f"{url}/{sa_id_target}"
+                # For update, payload typically just needs fields to change + name
+                update_payload = {"name": name, "role": role}
+                
+                r_up = requests.put(update_url, auth=get_auth(), json=update_payload)
+                success, msg = check_response(r_up, f"Update SA Role")
+                if not success:
+                     return {"name": name, "status": f"Role Update Failed: {msg}"}
+        else:
+            # 2. Create if not exists
             r = requests.post(url, auth=get_auth(), json=payload)
             success, msg = check_response(r, f"Create Service Account {name}")
             if success:
@@ -301,13 +318,14 @@ def ensure_service_account(org_name, org_id, name, role="admin"):
             else:
                 return {"name": name, "status": f"Failed: {msg}"}
         
+        # 3. Retrieve Token (Ensure this is aligned inside the TRY block)
         token = get_service_account_token(org_id, sa_email)
         
         if token:
              return {
                 "name": name, 
                 "email": sa_email,
-                "status": "Created" if created else "Exists",
+                "status": "Created" if created else "Exists/Updated",
                 "token": token
             }
         else:
@@ -358,7 +376,7 @@ def apply_org(org_name, create_users=False):
     role_ok = ensure_custom_role(org_id, "tenant-role", TENANT_ROLE_PERMISSIONS)
     report["roles"].append(f"tenant-role: {'OK' if role_ok else 'FAIL'}")
 
-    # 4. Service Account (sa-gitops)
+    # 4. Service Account (sa-gitops) -> FORCED TO ADMIN ROLE
     report["service_accounts"].append(ensure_service_account(org_name, org_id, "sa-gitops", "admin"))
     
     # 5. Standard Users (assigned tenant-role)
