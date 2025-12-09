@@ -61,10 +61,10 @@ resource "null_resource" "wait_for_operator" {
     interpreter = ["/bin/bash", "-c"]
     command     = <<EOT
       echo "⏳ (Create) Waiting for Operator Deployment..."
-      until kubectl get deployment -n opentelemetry-operator-system opentelemetry-operator-controller-manager >/dev/null 2>&1; do 
+      until kubectl get deployment -n opentelemetry-operator-system opentelemetry-operator >/dev/null 2>&1; do 
         sleep 5
       done
-      kubectl wait --for=condition=available --timeout=300s deployment/opentelemetry-operator-controller-manager -n opentelemetry-operator-system
+      kubectl wait --for=condition=available --timeout=300s deployment/opentelemetry-operator -n opentelemetry-operator-system
     EOT
   }
 
