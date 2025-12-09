@@ -41,7 +41,6 @@ spec:
           collectorImage:
             repository: "otel/opentelemetry-collector-contrib"
             tag: "0.104.0"
-        # Removed admissionWebhooks settings entirely (Default Fallback)
   destination:
     server: https://kubernetes.default.svc
     namespace: opentelemetry-operator-system
@@ -55,21 +54,36 @@ spec:
 YAML
 }
 
-# 3. HEALTH CHECK WAITER
-# This blocks until the Operator is actually ready in the cluster
+# 3. HEALTH CHECK & CLEANUP WAITER
 resource "null_resource" "wait_for_operator" {
+  # CREATE-TIME: Wait for Operator to be healthy
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
     command     = <<EOT
-      echo "⏳ Waiting for Operator Deployment to be created..."
-      until kubectl get deployment -n opentelemetry-operator-system opentelemetry-operator >/dev/null 2>&1; do 
+      echo "⏳ (Create) Waiting for Operator Deployment..."
+      until kubectl get deployment -n opentelemetry-operator-system opentelemetry-operator-controller-manager >/dev/null 2>&1; do 
         sleep 5
       done
-      
-      echo "⏳ Waiting for Operator to be HEALTHY..."
-      kubectl wait --for=condition=available --timeout=300s deployment/opentelemetry-operator -n opentelemetry-operator-system
+      kubectl wait --for=condition=available --timeout=300s deployment/opentelemetry-operator-controller-manager -n opentelemetry-operator-system
     EOT
   }
+
+  # DESTROY-TIME: Wait for Collectors to be gone before allowing Operator delete
+  # This ensures the Operator stays alive long enough to handle the finalizers of the collectors
+  provisioner "local-exec" {
+    when        = destroy
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<EOT
+      echo "⏳ (Destroy) Waiting for OpenTelemetry Collectors to be deleted..."
+      # Loop until no collectors exist in the specific namespace
+      while kubectl get opentelemetrycollector -n openobserve-collector-system 2>/dev/null | grep -q .; do
+        echo "   ... collectors still exist, waiting for Operator to clean them up"
+        sleep 5
+      done
+      echo "✅ Collectors gone. Safe to delete Operator."
+    EOT
+  }
+
   depends_on = [kubectl_manifest.otel_operator]
 }
 
@@ -91,16 +105,13 @@ spec:
       values: |
         k8sCluster: "microk8s-cluster"
         
-        # Disable the bundled operator
         opentelemetry-operator:
           enabled: false
 
-        # Compatibility Image
         image:
           repository: "otel/opentelemetry-collector-contrib"
           tag: "0.104.0"
 
-        # Exporter Config
         exporters:
           "otlphttp/openobserve":
             endpoint: "http://openobserve-router.openobserve-system.svc.cluster.local:5080/api/platform_kubernetes"

@@ -1,4 +1,4 @@
-# OpenObserve HA Stack: Production in a Box
+# OpenObserve HA Stack KubeCon 2026
 
 ![Screenshot of OpenObserve](images/openobserve.png)
 
@@ -22,6 +22,8 @@ This demo uses **Terraform** to bootstrap **ArgoCD**, which then manages complex
 ## ⚡ Quick Start
 
 ### 1. Prerequisites
+* **OS**: Linux or macOS (Intel/Apple Silicon)
+    * **Tested on:** Ubuntu 24.04.3 LTS
 * **Microk8s** (Running with `dns`, `helm3`, `storage` enabled)
 * **Terraform** (>= 1.0) & **Python 3**
 * **Make**
@@ -30,10 +32,9 @@ This demo uses **Terraform** to bootstrap **ArgoCD**, which then manages complex
 Export your Microk8s config so Terraform can access the cluster.
 
 ```bash
-mkdir -p ~/.kube
-microk8s config > ~/.kube/config
-chmod 600 ~/.kube/config
+make install-microk8s
 ```
+*(Or manually: `microk8s config | cat > ~/.kube/config`)*
 
 ### 3. Deploy Core Infrastructure
 Initialize Terraform and deploy the core services (ArgoCD, MinIO, DB, OpenObserve).
@@ -48,9 +49,9 @@ Establish local port-forwards and use the Python automation to create Organizati
 
 ```bash
 # 1. Open tunnels to the cluster
-./manage-local-connection.sh start
+make start
 
-# 2. Bootstrap Tenants (creates orgs: platform, team1, team2)
+# 2. Bootstrap Tenants (creates orgs, users, roles)
 python3 o2_manager.py bootstrap
 ```
 
@@ -58,7 +59,7 @@ python3 o2_manager.py bootstrap
 Retrieve generated passwords for ArgoCD, MinIO, and OpenObserve.
 
 ```bash
-./manage-local-connection.sh info
+make info
 ```
 
 ### 6. Deploy Collectors
@@ -70,17 +71,34 @@ make apply-collectors
 
 ---
 
-## 🧠 Automation Reference
+## 🧠 Automation Reference: `o2_manager.py`
 
-We use `o2_manager.py` to handle API logic that Terraform cannot (dynamic tokens, internal O2 resources).
+This Python script automates the "Day 2" operations that Terraform cannot easily handle (dynamic API tokens, internal O2 logic).
 
-* `bootstrap`: Sets up default Orgs, Streams, Roles, and Service Accounts.
-* `show-all`: Dumps a JSON overview of the entire multi-tenant landscape.
-* `cleanup-all`: **Destructive**. Purges all resources inside organizations.
+### Created Resources (Bootstrap Mode)
+
+Running `python3 o2_manager.py bootstrap` creates the following multi-tenant structure:
+
+| Resource Type | Created Items | Details |
+| :--- | :--- | :--- |
+| **Organizations** | `platform_observability`<br>`platform_kubernetes`<br>`team1`<br>`team2` | Isolated tenants for different teams. |
+| **Streams** | `{org}_short_term` (24h)<br>`{org}_default` (10d)<br>`{org}_long_term` (35d) | Log retention policies prefixed with the Org name. |
+| **Custom Roles** | `tenant-role` | A restrictive role allowing Read-Only access to streams and dashboards (assigned to users). |
+| **Service Accounts** | `sa-gitops` | Used by OTel Collectors for ingestion.<br>**Email:** `sa-gitops-{org}@example.com` |
+| **Users** | `user1-{org}@example.com`<br>`user2-{org}@example.com`<br>`user3-{org}@example.com` | Sample team members assigned the `tenant-role`. |
+
+### Commands
+
+| Command | Description |
+| :--- | :--- |
+| `bootstrap` | Creates all the resources listed above. |
+| `show-all` | Displays a JSON overview of all Orgs, Users, Roles, and Service Accounts. |
+| `cleanup-all` | **Destructive**: Purges all Streams, Users, and Roles from all Organizations (keeps the Org shell). |
+| `apply <org>` | Applies configuration to a single specific Organization. |
 
 ## 📂 Structure
 * `main.tf`: Core Infrastructure (Argo/O2/MinIO)
-* `collectors/`: OTel Collector configurations
+* `collectors/`: OTel Collector configurations (Split Architecture: Standalone Operator + Standalone Collector)
 * `o2_manager.py`: Multi-tenant API automation
 * `manage-local-connection.sh`: Connectivity helper
 

@@ -110,36 +110,48 @@ def get_all_orgs_raw():
         print(f"      ❌ Connection Error listing orgs: {e}")
         return []
 
-def get_org_users(org):
+def get_org_id(org_name):
+    """
+    Resolves an Organization Name to its ID (identifier).
+    Returns None if not found.
+    """
+    all_orgs = get_all_orgs_raw()
+    for o in all_orgs:
+        if o.get('name') == org_name:
+            # The API usually returns 'identifier' or 'id'
+            return o.get('identifier') or o.get('id')
+    return None
+
+def get_org_users(org_id):
     try:
-        r = requests.get(f"{O2_URL}/api/{org}/users", auth=get_auth())
+        r = requests.get(f"{O2_URL}/api/{org_id}/users", auth=get_auth())
         if r.status_code == 200:
             data = r.json()
             return data.get('data', []) if isinstance(data, dict) else data
         return []
     except: return []
 
-def get_org_service_accounts(org):
+def get_org_service_accounts(org_id):
     try:
-        r = requests.get(f"{O2_URL}/api/{org}/service_accounts", auth=get_auth())
+        r = requests.get(f"{O2_URL}/api/{org_id}/service_accounts", auth=get_auth())
         if r.status_code == 200:
             data = r.json()
             return data.get('data', []) if isinstance(data, dict) else data
         return []
     except: return []
 
-def get_org_roles(org):
+def get_org_roles(org_id):
     try:
-        r = requests.get(f"{O2_URL}/api/{org}/roles", auth=get_auth())
+        r = requests.get(f"{O2_URL}/api/{org_id}/roles", auth=get_auth())
         if r.status_code == 200:
             data = r.json()
             return data.get('data', []) if isinstance(data, dict) else data
         return []
     except: return []
 
-def get_org_streams(org):
+def get_org_streams(org_id):
     try:
-        r = requests.get(f"{O2_URL}/api/{org}/streams", auth=get_auth())
+        r = requests.get(f"{O2_URL}/api/{org_id}/streams", auth=get_auth())
         if r.status_code == 200:
             data = r.json()
             return data.get('list', []) if isinstance(data, dict) else data
@@ -148,8 +160,8 @@ def get_org_streams(org):
 
 # --- RESOURCE MANAGEMENT ---
 
-def configure_stream(org, stream_name, retention_hours):
-    url = f"{O2_URL}/api/{org}/streams/{stream_name}"
+def configure_stream(org_id, stream_name, retention_hours):
+    url = f"{O2_URL}/api/{org_id}/streams/{stream_name}"
     params = {"type": "logs"} 
     payload = {
         "fields": [],
@@ -179,18 +191,21 @@ def configure_stream(org, stream_name, retention_hours):
         print(f"      ❌ Connection Error: {e}")
         return False
 
-def ensure_custom_role(org, role_name, permissions):
+def ensure_custom_role(org_id, role_name, permissions):
     """Creates or updates a custom role using the specific schema provided."""
-    url = f"{O2_URL}/api/{org}/roles"
+    url = f"{O2_URL}/api/{org_id}/roles"
     
-    # NEW PAYLOAD SCHEMA
+    # FIX: Convert the list of objects to a list of JSON Strings
+    # This satisfies "expected a string" error while passing the complex structure
+    permissions_strings = [json.dumps(p) for p in permissions]
+    
     payload = {
         "role": role_name,
-        "custom_role": permissions # Passing the list of permission objects here
+        "custom_role": permissions_strings 
     }
     
     try:
-        current_roles = get_org_roles(org)
+        current_roles = get_org_roles(org_id)
         
         role_exists = False
         role_id = None
@@ -201,21 +216,18 @@ def ensure_custom_role(org, role_name, permissions):
                     role_exists = True
                     break 
             elif isinstance(r, dict):
-                # Check 'role' key as per new schema, fall back to 'name'
                 if r.get('role') == role_name or r.get('name') == role_name:
                     role_exists = True
                     role_id = r.get('id')
                     break
 
         if role_exists:
-            # Update
             target = str(role_id) if role_id else role_name
-            url = f"{O2_URL}/api/{org}/roles/{target}"
+            url = f"{O2_URL}/api/{org_id}/roles/{target}"
             r = requests.put(url, auth=get_auth(), json=payload)
             success, _ = check_response(r, f"Update Role {role_name}")
             return success
         else:
-            # Create
             r = requests.post(url, auth=get_auth(), json=payload)
             success, _ = check_response(r, f"Create Role {role_name}")
             return success
@@ -223,11 +235,10 @@ def ensure_custom_role(org, role_name, permissions):
         print(f"      ❌ Role Error: {e}")
         return False
 
-def ensure_user(org, email, role):
-    url = f"{O2_URL}/api/{org}/users"
+def ensure_user(org_id, email, role):
+    url = f"{O2_URL}/api/{org_id}/users"
     password = generate_password()
     
-    # NEW USER PAYLOAD SCHEMA
     payload = {
         "email": email,
         "first_name": "User", 
@@ -235,7 +246,7 @@ def ensure_user(org, email, role):
         "is_external": False,
         "password": password,
         "role": role,
-        "custom_role": [] # Empty list as we are using the named 'role'
+        "custom_role": []
     }
     
     try:
@@ -250,15 +261,13 @@ def ensure_user(org, email, role):
     except Exception as e:
         return {"email": email, "status": f"Conn Error: {e}"}
 
-def get_service_account_token(org, email):
+def get_service_account_token(org_id, email):
     """Fetches the token for an existing service account."""
-    url = f"{O2_URL}/api/{org}/service_accounts/{email}"
+    url = f"{O2_URL}/api/{org_id}/service_accounts/{email}"
     try:
         r = requests.get(url, auth=get_auth())
         if r.status_code == 200:
             data = r.json()
-            # The token is usually under 'data' -> 'token' or directly in 'token'
-            # Adjust based on exact API response. Assuming standard structure:
             if 'data' in data:
                 return data['data'].get('token')
             return data.get('token')
@@ -266,10 +275,11 @@ def get_service_account_token(org, email):
     except:
         return None
 
-def ensure_service_account(org, name, role="admin"):
-    url = f"{O2_URL}/api/{org}/service_accounts"
+def ensure_service_account(org_name, org_id, name, role="admin"):
+    url = f"{O2_URL}/api/{org_id}/service_accounts"
     
-    sa_email = f"{name}-{org}@example.com"
+    # We keep the human readable org name in the email for clarity
+    sa_email = f"{name}-{org_name}@example.com"
     
     payload = {
         "name": name, 
@@ -277,12 +287,10 @@ def ensure_service_account(org, name, role="admin"):
         "role": role
     }
     
-    # 1. Create or Check Existence
     try:
         created = False
         
-        # Check existing list
-        existing = get_org_service_accounts(org)
+        existing = get_org_service_accounts(org_id)
         exists = any(sa.get('name') == name for sa in existing)
 
         if not exists:
@@ -293,9 +301,7 @@ def ensure_service_account(org, name, role="admin"):
             else:
                 return {"name": name, "status": f"Failed: {msg}"}
         
-        # 2. Retrieve Token
-        # Now that it exists (or we just created it), fetch the detailed info to get the Token
-        token = get_service_account_token(org, sa_email)
+        token = get_service_account_token(org_id, sa_email)
         
         if token:
              return {
@@ -316,71 +322,88 @@ def apply_org(org_name, create_users=False):
     print(f"\n🚀 Processing: {org_name}")
     report = {"org": org_name, "streams": [], "roles": [], "users": [], "service_accounts": []}
 
-    # 1. Create Org
+    # 1. Create/Get Org ID
     all_orgs = get_all_orgs_raw()
-    existing_names = [o['name'] for o in all_orgs]
+    existing_org = next((o for o in all_orgs if o.get('name') == org_name), None)
     
-    if org_name not in existing_names:
+    org_id = None
+
+    if existing_org:
+        print(f"   ℹ️  Organization '{org_name}' already exists.")
+        org_id = existing_org.get('identifier') or existing_org.get('id')
+    else:
         try:
             r = requests.post(f"{O2_URL}/api/organizations", auth=get_auth(), json={"name": org_name})
-            check_response(r, "Create Organization")
+            success, _ = check_response(r, "Create Organization")
+            if not success: return report
             print("   ✅ Organization Created")
+            # Fetch again to get the ID
+            org_id = get_org_id(org_name)
         except Exception as e:
             print(f"   ❌ Org Connection Error: {e}")
             return report
-    else:
-        print(f"   ℹ️  Organization '{org_name}' already exists.")
 
-    # 2. Streams
+    if not org_id:
+        print(f"   ❌ FATAL: Could not resolve ID for organization '{org_name}'")
+        return report
+
+    # 2. Streams (PREFIXED WITH ORG NAME)
     for s in STREAMS_CONFIG:
-        ok = configure_stream(org_name, s['name'], s['retention'])
-        report["streams"].append(f"{s['name']}: {'OK' if ok else 'FAIL'}")
+        # e.g., platform_kubernetes_default
+        prefixed_name = f"{org_name}_{s['name']}"
+        ok = configure_stream(org_id, prefixed_name, s['retention'])
+        report["streams"].append(f"{prefixed_name}: {'OK' if ok else 'FAIL'}")
 
     # 3. Custom Roles (tenant-role)
-    role_ok = ensure_custom_role(org_name, "tenant-role", TENANT_ROLE_PERMISSIONS)
+    role_ok = ensure_custom_role(org_id, "tenant-role", TENANT_ROLE_PERMISSIONS)
     report["roles"].append(f"tenant-role: {'OK' if role_ok else 'FAIL'}")
 
     # 4. Service Account (sa-gitops)
-    report["service_accounts"].append(ensure_service_account(org_name, "sa-gitops", "admin"))
+    report["service_accounts"].append(ensure_service_account(org_name, org_id, "sa-gitops", "admin"))
     
     # 5. Standard Users (assigned tenant-role)
     if create_users:
         print("   👥 Ensuring sample users...")
         for i in range(1, 4):
-            report["users"].append(ensure_user(org_name, f"user{i}-{org_name}@example.com", "tenant-role"))
+            report["users"].append(ensure_user(org_id, f"user{i}-{org_name}@example.com", "tenant-role"))
 
     return report
 
 def clean_org_resources(org_name, no_confirm=False):
+    org_id = get_org_id(org_name)
+    if not org_id:
+        print(f"❌ Organization '{org_name}' not found. Cannot purge.")
+        return
+
     if not no_confirm:
-        check = input(f"🔥 PURGE RESOURCES for '{org_name}'? Type 'CONFIRM': ")
+        check = input(f"🔥 PURGE RESOURCES for '{org_name}' (ID: {org_id})? Type 'CONFIRM': ")
         if check != "CONFIRM": return
 
     print(f"   🧹 Cleaning resources in: {org_name}")
 
     # 1. Delete Service Accounts
-    sas = get_org_service_accounts(org_name)
+    sas = get_org_service_accounts(org_id)
     for sa in sas:
         target = sa.get('email') or sa.get('name')
         if target:
             try:
-                requests.delete(f"{O2_URL}/api/{org_name}/service_accounts/{target}", auth=get_auth())
+                requests.delete(f"{O2_URL}/api/{org_id}/service_accounts/{target}", auth=get_auth())
                 print(f"      - Deleted SA: {target}")
             except: pass
 
     # 2. Delete Users (Skip Self)
-    users = get_org_users(org_name)
+    users = get_org_users(org_id)
     for u in users:
         email = u.get('email')
         if email and email != ADMIN_EMAIL:
             try:
-                requests.delete(f"{O2_URL}/api/{org_name}/users/{email}", auth=get_auth())
+                requests.delete(f"{O2_URL}/api/{org_id}/users/{email}", auth=get_auth())
                 print(f"      - Deleted User: {email}")
             except: pass
 
     # 3. Delete Custom Roles
     SYSTEM_ROLES = ['admin', 'editor', 'member', 'viewer']
-    roles = get_org_roles(org_name)
+    roles = get_org_roles(org_id)
     for r in roles:
         if isinstance(r, str):
             r_name = r
@@ -391,17 +414,17 @@ def clean_org_resources(org_name, no_confirm=False):
 
         if r_name and r_name not in SYSTEM_ROLES:
             try:
-                requests.delete(f"{O2_URL}/api/{org_name}/roles/{r_id}", auth=get_auth())
+                requests.delete(f"{O2_URL}/api/{org_id}/roles/{r_id}", auth=get_auth())
                 print(f"      - Deleted Role: {r_name}")
             except: pass
 
     # 4. Delete Streams
-    streams = get_org_streams(org_name)
+    streams = get_org_streams(org_id)
     for s in streams:
         s_name = s.get('name')
         if s_name and not s_name.startswith('_'):
             try:
-                requests.delete(f"{O2_URL}/api/{org_name}/streams/{s_name}", auth=get_auth())
+                requests.delete(f"{O2_URL}/api/{org_id}/streams/{s_name}", auth=get_auth())
                 print(f"      - Deleted Stream: {s_name}")
             except: pass
     
@@ -438,19 +461,24 @@ def run_show_all():
         name = o.get('name')
         if name == '_meta': continue
         
-        print(f"   ... scanning {name}")
+        # Use ID for lookups
+        org_id = o.get('identifier') or o.get('id')
+        if not org_id: continue
+
+        print(f"   ... scanning {name} ({org_id})")
         
-        raw_roles = get_org_roles(name)
+        raw_roles = get_org_roles(org_id)
         safe_roles = []
         for r in raw_roles:
             if isinstance(r, str): safe_roles.append(r)
             elif isinstance(r, dict): safe_roles.append(r.get('role') or r.get('name', 'unknown'))
             
         overview[name] = {
-            "streams": [s.get('name') for s in get_org_streams(name)],
+            "id": org_id,
+            "streams": [s.get('name') for s in get_org_streams(org_id)],
             "roles": safe_roles,
-            "users": [f"{u.get('email')} ({u.get('role')})" for u in get_org_users(name)],
-            "service_accounts": [sa.get('name') for sa in get_org_service_accounts(name)]
+            "users": [f"{u.get('email')} ({u.get('role')})" for u in get_org_users(org_id)],
+            "service_accounts": [sa.get('name') for sa in get_org_service_accounts(org_id)]
         }
     
     print("\n" + json.dumps(overview, indent=2))

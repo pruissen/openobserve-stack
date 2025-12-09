@@ -2,10 +2,36 @@
 TF_FLAGS = -var="zo_root_password=$(ZO_ROOT_PASSWORD)"
 ZO_ROOT_PASSWORD ?= ComplexPassword123!
 
-.PHONY: help init plan apply plan-collectors apply-collectors start stop info clean
+.PHONY: help init plan apply plan-collectors apply-collectors start stop info clean install-microk8s remove-microk8s
 
 help: ## Show help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# --- CLUSTER MANAGEMENT ---
+
+install-microk8s: ## Install Microk8s, enable addons, and configure access
+	@echo "--- Installing Microk8s (Requires Sudo) ---"
+	sudo snap install microk8s --classic
+	@echo "--- Configuring Permissions ---"
+	sudo usermod -a -G microk8s $(USER)
+	sudo mkdir -p ~/.kube
+	sudo chown -f -R $(USER) ~/.kube
+	@echo "--- Waiting for Cluster to be Ready ---"
+	sudo microk8s status --wait-ready
+	@echo "--- Enabling Addons (dns, helm3, storage) ---"
+	sudo microk8s enable dns helm3 storage
+	@echo "--- Exporting Kubeconfig ---"
+	# Using 'cat' to bypass potential snap stdout issues
+	sudo microk8s config | cat > ~/.kube/config
+	chmod 600 ~/.kube/config
+	@echo "---------------------------------------------------"
+	@echo "✅ Microk8s Ready. NOTE: You must run 'newgrp microk8s' or re-login to use kubectl commands without sudo."
+
+remove-microk8s: ## Purge Microk8s and clean configuration
+	@echo "--- Removing Microk8s ---"
+	sudo snap remove microk8s --purge
+	@rm -f ~/.kube/config
+	@echo "✅ Microk8s Removed."
 
 # --- CORE INFRASTRUCTURE ---
 
@@ -42,29 +68,30 @@ apply-collectors: ## Apply Collectors (Requires 'make plan-collectors' first)
 # --- MANAGEMENT ---
 
 start: ## Start Port Forwards (Background)
-	@chmod +x manage.sh
-	@./manage.sh start
+	@chmod +x manage-local-connection.sh
+	@./manage-local-connection.sh start
 
 stop: ## Stop Port Forwards
-	@chmod +x manage.sh
-	@./manage.sh stop
+	@chmod +x manage-local-connection.sh
+	@./manage-local-connection.sh stop
 
 restart: ## Restart Port Forwards
-	@chmod +x manage.sh
-	@./manage.sh restart
+	@chmod +x manage-local-connection.sh
+	@./manage-local-connection.sh restart
 
 info: ## Show Service Credentials and URLs
-	@chmod +x manage.sh
-	@./manage.sh info
+	@chmod +x manage-local-connection.sh
+	@./manage-local-connection.sh info
 
 # --- CLEANUP ---
 
 clean: ## Destroy Everything (Core + Collectors)
 	@echo "Stopping port-forwards..."
-	@./manage.sh stop
+	@./manage-local-connection.sh stop || true
 	@echo "Destroying Collectors..."
 	cd collectors && terraform destroy -auto-approve || true
 	@echo "Destroying Core Infrastructure..."
 	terraform destroy -auto-approve $(TF_FLAGS)
 	@echo "Cleaning up plan files..."
 	@rm -f core.tfplan collectors/collectors.tfplan
+	@rm -f bootstrap_results.json
