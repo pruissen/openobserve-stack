@@ -1,4 +1,3 @@
-
 # ============================================================================
 # 1. NAMESPACES
 # ============================================================================
@@ -191,6 +190,8 @@ spec:
           ZO_S3_BUCKET_NAME: 'openobserve-data'
           ZO_S3_REGION_NAME: 'eu-central-1'
           ZO_HA_MODE: 'true'
+          # Added usage reporting as requested
+          ZO_USAGE_REPORTING_ENABLED: 'true'
           # ZO_META_STORE defaults to 'db' (Postgres) when not set to 'etcd'
 
         extraEnv:

@@ -54,7 +54,7 @@ spec:
 YAML
 }
 
-# 3. HEALTH CHECK & CLEANUP WAITER
+# 3. HEALTH CHECK & FORCEFUL CLEANUP
 resource "null_resource" "wait_for_operator" {
   # CREATE-TIME: Wait for Operator to be healthy
   provisioner "local-exec" {
@@ -68,19 +68,41 @@ resource "null_resource" "wait_for_operator" {
     EOT
   }
 
-  # DESTROY-TIME: Wait for Collectors to be gone before allowing Operator delete
-  # This ensures the Operator stays alive long enough to handle the finalizers of the collectors
+  # DESTROY-TIME: Force remove finalizers to prevent hanging
   provisioner "local-exec" {
     when        = destroy
     interpreter = ["/bin/bash", "-c"]
     command     = <<EOT
-      echo "⏳ (Destroy) Waiting for OpenTelemetry Collectors to be deleted..."
-      # Loop until no collectors exist in the specific namespace
-      while kubectl get opentelemetrycollector -n openobserve-collector-system 2>/dev/null | grep -q .; do
-        echo "   ... collectors still exist, waiting for Operator to clean them up"
-        sleep 5
+      echo "🧹 (Destroy) Force cleaning OpenTelemetry Collectors..."
+      
+      NAMESPACE="openobserve-collector-system"
+      
+      # 1. Identify existing collectors
+      COLLECTORS=$(kubectl get opentelemetrycollector -n $NAMESPACE -o name 2>/dev/null)
+      
+      if [ -z "$COLLECTORS" ]; then
+        echo "✅ No collectors found. Clean."
+        exit 0
+      fi
+
+      echo "⚠️  Found collectors: $COLLECTORS"
+      
+      # 2. The 'Nuclear' Option: Patch finalizers to null
+      # This tells K8s "don't wait for the operator, just delete it now"
+      for col in $COLLECTORS; do
+        echo "   - Patching finalizers for $col..."
+        # This command removes the finalizer block
+        kubectl patch $col -n $NAMESPACE -p '{"metadata":{"finalizers":[]}}' --type=merge || true
+        
+        echo "   - Force deleting $col..."
+        kubectl delete $col -n $NAMESPACE --ignore-not-found=true --wait=false
       done
-      echo "✅ Collectors gone. Safe to delete Operator."
+
+      # 3. Short wait to verify they are gone (with timeout to prevent infinite hang)
+      echo "⏳ Verifying deletion..."
+      timeout 30 bash -c "while kubectl get opentelemetrycollector -n $NAMESPACE 2>/dev/null | grep -q .; do sleep 2; done" || echo "⚠️ Timeout waiting for verification, but finalizers are gone so K8s will clean up."
+      
+      echo "✅ Cleanup complete."
     EOT
   }
 

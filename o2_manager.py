@@ -21,61 +21,34 @@ STREAMS_CONFIG = [
 
 BOOTSTRAP_ORGS = ["platform_observability", "platform_kubernetes", "team1", "team2"]
 
-# Permissions definition (List of Objects)
-TENANT_ROLE_PERMISSIONS = [
-    {"object": "stream:_all_default", "permission": "AllowList"},
-    {"object": "stream:_all_default", "permission": "AllowGet"},
-    {"object": "function:_all_default", "permission": "AllowAll"},
-    {"object": "dfolder:_all_default", "permission": "AllowAll"},
-    {"object": "template:_all_default", "permission": "AllowList"},
-    {"object": "template:_all_default", "permission": "AllowGet"},
-    {"object": "destination:_all_default", "permission": "AllowList"},
-    {"object": "destination:_all_default", "permission": "AllowGet"},
-    {"object": "user:_all_default", "permission": "AllowList"},
-    {"object": "user:_all_default", "permission": "AllowGet"},
-    {"object": "role:_all_default", "permission": "AllowList"},
-    {"object": "role:_all_default", "permission": "AllowGet"},
-    {"object": "group:_all_default", "permission": "AllowList"},
-    {"object": "group:_all_default", "permission": "AllowGet"},
-    {"object": "enrichment_table:_all_default", "permission": "AllowAll"},
-    {"object": "settings:_all_default", "permission": "AllowGet"},
-    {"object": "kv:_all_default", "permission": "AllowList"},
-    {"object": "kv:_all_default", "permission": "AllowGet"},
-    {"object": "syslog-route:_all_default", "permission": "AllowList"},
-    {"object": "syslog-route:_all_default", "permission": "AllowGet"},
-    {"object": "summary:_all_default", "permission": "AllowList"},
-    {"object": "summary:_all_default", "permission": "AllowGet"},
-    {"object": "passcode:_all_default", "permission": "AllowList"},
-    {"object": "passcode:_all_default", "permission": "AllowGet"},
-    {"object": "rumtoken:_all_default", "permission": "AllowList"},
-    {"object": "rumtoken:_all_default", "permission": "AllowGet"},
-    {"object": "savedviews:_all_default", "permission": "AllowList"},
-    {"object": "savedviews:_all_default", "permission": "AllowGet"},
-    {"object": "metadata:_all_default", "permission": "AllowList"},
-    {"object": "metadata:_all_default", "permission": "AllowGet"},
-    {"object": "report:_all_default", "permission": "AllowList"},
-    {"object": "report:_all_default", "permission": "AllowGet"},
-    {"object": "pipeline:_all_default", "permission": "AllowList"},
-    {"object": "pipeline:_all_default", "permission": "AllowGet"},
-    {"object": "service_accounts:_all_default", "permission": "AllowList"},
-    {"object": "service_accounts:_all_default", "permission": "AllowGet"},
-    {"object": "search_jobs:_all_default", "permission": "AllowList"},
-    {"object": "search_jobs:_all_default", "permission": "AllowGet"},
-    {"object": "cipher_keys:_all_default", "permission": "AllowList"},
-    {"object": "cipher_keys:_all_default", "permission": "AllowGet"},
-    {"object": "action_scripts:_all_default", "permission": "AllowList"},
-    {"object": "action_scripts:_all_default", "permission": "AllowGet"},
-    {"object": "afolder:_all_default", "permission": "AllowList"},
-    {"object": "afolder:_all_default", "permission": "AllowGet"},
-    {"object": "ratelimit:_all_default", "permission": "AllowList"},
-    {"object": "ratelimit:_all_default", "permission": "AllowGet"},
-    {"object": "ai:_all_default", "permission": "AllowList"},
-    {"object": "ai:_all_default", "permission": "AllowGet"},
-    {"object": "re_patterns:_all_default", "permission": "AllowList"},
-    {"object": "re_patterns:_all_default", "permission": "AllowGet"},
-    {"object": "license:_all_default", "permission": "AllowList"},
-    {"object": "license:_all_default", "permission": "AllowGet"}
-]
+# Dashboard Sources
+DASHBOARD_SOURCES = {
+    "kubernetes": [
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20%20_%20Namespace%20(Pod).dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20%20_%20Namespace%20(Pods).dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20%20_%20Namespaces.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20%20_%20Nodes.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20Nodes%20Pressure.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20_%20Events.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20_%20Namespace%20(Objects).dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Kubernetes(openobserve-collector)/Kubernetes%20_%20Node%20(Pods).dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/ArgoCD/ArgoCD%20Monitoring.dashboard.json"
+    ],
+    "openobserve": [
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/OpenObserve/OpenObserve%20Infrastructure.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/OpenObserve/OpenObserve%20Internals.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Usage/Usage%20_%20Org.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Usage/Usage%20_%20Overall.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/hostmetrics/Host%20Metrics.dashboard.json",
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Uptime_Monitor/Uptime_Monitoring_Dashboard.json"
+    ],
+    "github": [
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/Github/Github.dashboard.json"
+    ],
+    "postgres": [
+        "https://raw.githubusercontent.com/openobserve/dashboards/refs/heads/main/PostgreSQL%20Metrics/PostgreSQL.dashboard.json"
+    ]
+}
 
 # --- HELPERS ---
 
@@ -118,7 +91,6 @@ def get_org_id(org_name):
     all_orgs = get_all_orgs_raw()
     for o in all_orgs:
         if o.get('name') == org_name:
-            # The API usually returns 'identifier' or 'id'
             return o.get('identifier') or o.get('id')
     return None
 
@@ -191,49 +163,6 @@ def configure_stream(org_id, stream_name, retention_hours):
         print(f"      ❌ Connection Error: {e}")
         return False
 
-def ensure_custom_role(org_id, role_name, permissions):
-    """Creates or updates a custom role using the specific schema provided."""
-    url = f"{O2_URL}/api/{org_id}/roles"
-    
-    # FIX: Convert the list of objects to a list of JSON Strings
-    permissions_strings = [json.dumps(p) for p in permissions]
-    
-    payload = {
-        "role": role_name,
-        "custom_role": permissions_strings 
-    }
-    
-    try:
-        current_roles = get_org_roles(org_id)
-        
-        role_exists = False
-        role_id = None
-        
-        for r in current_roles:
-            if isinstance(r, str):
-                if r == role_name: 
-                    role_exists = True
-                    break 
-            elif isinstance(r, dict):
-                if r.get('role') == role_name or r.get('name') == role_name:
-                    role_exists = True
-                    role_id = r.get('id')
-                    break
-
-        if role_exists:
-            target = str(role_id) if role_id else role_name
-            url = f"{O2_URL}/api/{org_id}/roles/{target}"
-            r = requests.put(url, auth=get_auth(), json=payload)
-            success, _ = check_response(r, f"Update Role {role_name}")
-            return success
-        else:
-            r = requests.post(url, auth=get_auth(), json=payload)
-            success, _ = check_response(r, f"Create Role {role_name}")
-            return success
-    except Exception as e:
-        print(f"      ❌ Role Error: {e}")
-        return False
-
 def ensure_user(org_id, email, role):
     url = f"{O2_URL}/api/{org_id}/users"
     password = generate_password()
@@ -244,7 +173,7 @@ def ensure_user(org_id, email, role):
         "last_name": "Team",
         "is_external": False,
         "password": password,
-        "role": role,
+        "role": role, # Built-in role (admin, member, etc.)
         "custom_role": []
     }
     
@@ -298,17 +227,15 @@ def ensure_service_account(org_name, org_id, name, role="admin"):
             current_role = existing_sa.get('role')
             if current_role != role:
                 print(f"      🔄 Updating SA '{name}' role from '{current_role}' to '{role}'...")
-                # Update requires the email (which serves as ID usually) or the 'id' field
                 sa_id_target = existing_sa.get('email') or existing_sa.get('id')
                 
                 update_url = f"{url}/{sa_id_target}"
-                # For update, payload typically just needs fields to change + name
                 update_payload = {"name": name, "role": role}
                 
                 r_up = requests.put(update_url, auth=get_auth(), json=update_payload)
                 success, msg = check_response(r_up, f"Update SA Role")
                 if not success:
-                     return {"name": name, "status": f"Role Update Failed: {msg}"}
+                      return {"name": name, "status": f"Role Update Failed: {msg}"}
         else:
             # 2. Create if not exists
             r = requests.post(url, auth=get_auth(), json=payload)
@@ -318,7 +245,7 @@ def ensure_service_account(org_name, org_id, name, role="admin"):
             else:
                 return {"name": name, "status": f"Failed: {msg}"}
         
-        # 3. Retrieve Token (Ensure this is aligned inside the TRY block)
+        # 3. Retrieve Token
         token = get_service_account_token(org_id, sa_email)
         
         if token:
@@ -334,11 +261,43 @@ def ensure_service_account(org_name, org_id, name, role="admin"):
     except Exception as e:
         return {"name": name, "status": f"Conn Error: {e}"}
 
+def import_dashboards_to_org(org_name, org_id):
+    print(f"\n   📦 Importing dashboards to {org_name}...")
+    
+    url = f"{O2_URL}/api/{org_id}/dashboards"
+    
+    for category, links in DASHBOARD_SOURCES.items():
+        print(f"      📂 Category: {category}")
+        for link in links:
+            try:
+                # 1. Download Dashboard JSON
+                dash_resp = requests.get(link)
+                if dash_resp.status_code != 200:
+                    print(f"         ❌ Failed to download: {link}")
+                    continue
+                
+                dashboard_data = dash_resp.json()
+                dashboard_title = dashboard_data.get("title", "Unknown")
+                
+                # 2. Post to OpenObserve
+                # Note: O2 will create a new dashboard. If ID exists, behavior depends on version (usually conflict or create new)
+                # We strip ID to ensure creation of a fresh copy or let O2 handle it.
+                if 'dashboardId' in dashboard_data:
+                    del dashboard_data['dashboardId']
+
+                r = requests.post(url, auth=get_auth(), json=dashboard_data)
+                if r.status_code in [200, 201]:
+                     print(f"         ✅ Imported: {dashboard_title}")
+                else:
+                     print(f"         ⚠️ Failed to import '{dashboard_title}': {r.status_code}")
+            except Exception as e:
+                print(f"         ❌ Error importing {link}: {e}")
+
 # --- CORE ACTIONS ---
 
 def apply_org(org_name, create_users=False):
     print(f"\n🚀 Processing: {org_name}")
-    report = {"org": org_name, "streams": [], "roles": [], "users": [], "service_accounts": []}
+    report = {"org": org_name, "streams": [], "users": [], "service_accounts": []}
 
     # 1. Create/Get Org ID
     all_orgs = get_all_orgs_raw()
@@ -355,7 +314,6 @@ def apply_org(org_name, create_users=False):
             success, _ = check_response(r, "Create Organization")
             if not success: return report
             print("   ✅ Organization Created")
-            # Fetch again to get the ID
             org_id = get_org_id(org_name)
         except Exception as e:
             print(f"   ❌ Org Connection Error: {e}")
@@ -367,23 +325,18 @@ def apply_org(org_name, create_users=False):
 
     # 2. Streams (PREFIXED WITH ORG NAME)
     for s in STREAMS_CONFIG:
-        # e.g., platform_kubernetes_default
         prefixed_name = f"{org_name}_{s['name']}"
         ok = configure_stream(org_id, prefixed_name, s['retention'])
         report["streams"].append(f"{prefixed_name}: {'OK' if ok else 'FAIL'}")
 
-    # 3. Custom Roles (tenant-role)
-    role_ok = ensure_custom_role(org_id, "tenant-role", TENANT_ROLE_PERMISSIONS)
-    report["roles"].append(f"tenant-role: {'OK' if role_ok else 'FAIL'}")
-
-    # 4. Service Account (sa-gitops) -> FORCED TO ADMIN ROLE
+    # 3. Service Account (sa-gitops) -> RESTORED TO ADMIN
     report["service_accounts"].append(ensure_service_account(org_name, org_id, "sa-gitops", "admin"))
     
-    # 5. Standard Users (assigned tenant-role)
+    # 4. Standard Users -> RESTORED TO ADMIN (per request for admin rights within org)
     if create_users:
         print("   👥 Ensuring sample users...")
         for i in range(1, 4):
-            report["users"].append(ensure_user(org_id, f"user{i}-{org_name}@example.com", "tenant-role"))
+            report["users"].append(ensure_user(org_id, f"user{i}-{org_name}@example.com", "admin"))
 
     return report
 
@@ -419,24 +372,7 @@ def clean_org_resources(org_name, no_confirm=False):
                 print(f"      - Deleted User: {email}")
             except: pass
 
-    # 3. Delete Custom Roles
-    SYSTEM_ROLES = ['admin', 'editor', 'member', 'viewer']
-    roles = get_org_roles(org_id)
-    for r in roles:
-        if isinstance(r, str):
-            r_name = r
-            r_id = r
-        else:
-            r_name = r.get('role') or r.get('name')
-            r_id = r.get('id', r_name)
-
-        if r_name and r_name not in SYSTEM_ROLES:
-            try:
-                requests.delete(f"{O2_URL}/api/{org_id}/roles/{r_id}", auth=get_auth())
-                print(f"      - Deleted Role: {r_name}")
-            except: pass
-
-    # 4. Delete Streams
+    # 3. Delete Streams
     streams = get_org_streams(org_id)
     for s in streams:
         s_name = s.get('name')
@@ -468,6 +404,24 @@ def run_cleanup_all():
         print("\n✨ Cleanup Complete.")
     else:
         print("❌ Aborted.")
+
+def run_import_dashboards():
+    print("🎨 Starting Dashboard Import...")
+    # Import into all bootstrapped orgs
+    
+    # 1. Get IDs for Bootstrap Orgs
+    all_orgs = get_all_orgs_raw()
+    
+    # Map name -> ID
+    org_map = {o.get('name'): (o.get('identifier') or o.get('id')) for o in all_orgs}
+    
+    targets = BOOTSTRAP_ORGS
+    
+    for org_name in targets:
+        if org_name in org_map:
+            import_dashboards_to_org(org_name, org_map[org_name])
+        else:
+            print(f"⚠️  Skipping dashboard import for {org_name}: Org not found (run bootstrap first?)")
 
 def run_show_all():
     print("🔍 Scanning all organizations...")
@@ -517,6 +471,7 @@ def main():
     subparsers.add_parser("bootstrap", help="Setup default teams, users and service accounts")
     subparsers.add_parser("cleanup-all", help="Delete resources in ALL organizations (keeps orgs)")
     subparsers.add_parser("show-all", help="Show overview of all organizations and resources")
+    subparsers.add_parser("import-dashboards", help="Import standard dashboards into all bootstrapped orgs")
 
     p_apply = subparsers.add_parser("apply", help="Configure a specific Org")
     p_apply.add_argument("org_name", help="Name of the organization")
@@ -533,6 +488,8 @@ def main():
         run_cleanup_all()
     elif args.command == "show-all":
         run_show_all()
+    elif args.command == "import-dashboards":
+        run_import_dashboards()
     elif args.command == "apply": 
         print(json.dumps(apply_org(args.org_name, args.users), indent=2))
     elif args.command == "purge-org": 
