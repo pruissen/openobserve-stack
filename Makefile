@@ -117,9 +117,9 @@ install-demo: ## Plan & Apply OTel Demo
 uninstall-demo: ## Destroy OTel Demo
 	terraform destroy -auto-approve $(TF_DEMO)
 
-install-platform: install-core install-prereqs install-o2 #start bootstrap install-collectors ## Install Full Platform
+install-platform: install-prereqs install-o2 start bootstrap install-collectors ## Install Full Platform
 
-all: install-platform
+all: install-core  install-platform
 
 nuke: ## DESTROY EVERYTHING (Forcefully)
 	@echo "🔥 NUCLEAR LAUNCH DETECTED 🔥"
