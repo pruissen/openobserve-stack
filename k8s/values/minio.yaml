@@ -1,0 +1,35 @@
+# Configuration for Official MinIO Chart (charts.min.io)
+
+replicas: 1
+mode: standalone
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+
+# Auto-create the bucket OpenObserve needs
+buckets:
+  - name: openobserve-data
+    policy: none
+    purge: false
+
+# AUTHENTICATION FIX:
+# Point directly to the secret created by Terraform.
+# The secret MUST contain keys: 'rootUser' and 'rootPassword' (which main.tf does)
+existingSecret: "o2-platform-secret"
+
+# Disable Console/Ingress for simplicity
+console:
+  enabled: false
+ingress:
+  enabled: false
+metrics:
+  enabled: false

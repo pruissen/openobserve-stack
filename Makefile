@@ -1,97 +1,164 @@
-# Makefile for OpenObserve Stack
-TF_FLAGS = -var="zo_root_password=$(ZO_ROOT_PASSWORD)"
-ZO_ROOT_PASSWORD ?= ComplexPassword123!
+# Makefile for OpenObserve K3s Stack
 
-.PHONY: help init plan apply plan-collectors apply-collectors start stop info clean install-microk8s remove-microk8s
+KUBECONFIG := $(HOME)/.kube/config
+export KUBECONFIG
+
+# Terraform Targets
+TF_PREREQS := -target=kubernetes_namespace.ns \
+              -target=kubernetes_secret.o2_platform_secret \
+              -target=helm_release.argocd \
+              -target=null_resource.patch_argo_secret \
+              -target=kubectl_manifest.cnpg \
+              -target=kubectl_manifest.cert_manager \
+              -target=kubectl_manifest.otel_operator \
+              -target=kubectl_manifest.prometheus_crds \
+              -target=kubectl_manifest.minio
+
+# Target the ArgoCD Application for OpenObserve
+TF_O2      := -target=kubectl_manifest.openobserve
+              
+TF_COLL    := -target=kubectl_manifest.o2_collector
+TF_DEMO    := -target=kubectl_manifest.otel_demo
+
+.PHONY: all help install-core init uninstall-core install-prereqs uninstall-prereqs install-o2 uninstall-o2 install-collectors uninstall-collectors install-demo uninstall-demo install-platform nuke info start stop show
 
 help: ## Show help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-# --- CLUSTER MANAGEMENT ---
+# --- 1. CORE (K3s + TF Init) ---
 
-install-microk8s: ## Install Microk8s, enable addons, and configure access
-	@echo "--- Installing Microk8s (Requires Sudo) ---"
-	sudo snap install microk8s --classic
-	@echo "--- Configuring Permissions ---"
-	sudo usermod -a -G microk8s $(USER)
-	sudo mkdir -p ~/.kube
-	sudo chown -f -R $(USER) ~/.kube
-	@echo "--- Waiting for Cluster to be Ready ---"
-	sudo microk8s status --wait-ready
-	@echo "--- Enabling Addons (dns, helm3, storage) ---"
-	sudo microk8s enable dns helm3 storage
-	@echo "--- Exporting Kubeconfig ---"
-	# Using 'cat' to bypass potential snap stdout issues
-	sudo microk8s config | cat > ~/.kube/config
-	chmod 600 ~/.kube/config
-	@echo "---------------------------------------------------"
-	@echo "✅ Microk8s Ready. NOTE: You must run 'newgrp microk8s' or re-login to use kubectl commands without sudo."
+install-core: ## Install K3s and Init Terraform
+	@echo "--- Installing K3s ---"
+	curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+	@echo "--- Waiting for K3s ---"
+	@sleep 10
+	mkdir -p ~/.kube
+	cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+	@chmod 600 ~/.kube/config
+	@make init
 
-remove-microk8s: ## Purge Microk8s and clean configuration
-	@echo "--- Removing Microk8s ---"
-	sudo snap remove microk8s --purge
-	@rm -f ~/.kube/config
-	@echo "✅ Microk8s Removed."
+init: ## Init Terraform with Upgrade
+	@echo "--- Initializing Terraform (Upgrading Providers) ---"
+	terraform init --upgrade
 
-# --- CORE INFRASTRUCTURE ---
+uninstall-core: ## Uninstall K3s
+	@echo "--- Removing K3s ---"
+	/usr/local/bin/k3s-uninstall.sh || true
+	rm -rf ~/.kube
 
-init: ## Initialize Core Terraform
-	terraform init
+# --- 2. PREREQUISITES ---
 
-plan: init ## Generate execution plan for Core Infra
-	@echo "Planning Core Infrastructure..."
-	terraform plan -out=core.tfplan $(TF_FLAGS)
-	@echo "---------------------------------------------------"
-	@echo "Plan saved to 'core.tfplan'. Run 'make apply' to deploy."
+install-prereqs: ## Plan & Apply Prerequisites (Includes MinIO App)
+	@echo "--- Planning Prerequisites ---"
+	terraform plan $(TF_PREREQS) -out=prereqs.tfplan
+	@echo "--- Applying Prerequisites ---"
+	terraform apply prereqs.tfplan
+	@rm -f prereqs.tfplan
+	@echo "⏳ Waiting for MinIO ArgoCD App to sync..."
+	@timeout 60s bash -c "until kubectl get application minio -n argocd-system >/dev/null 2>&1; do sleep 2; done"
+	@echo "⏳ Waiting for MinIO pods to be ready..."
+	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=minio -n o2-system --timeout=300s || echo "⚠️  MinIO wait timed out"
 
-apply: ## Apply Core Infra (Requires 'make plan' first)
-	@echo "Applying Core Infrastructure..."
-	terraform apply core.tfplan
-	@rm core.tfplan
+uninstall-prereqs: ## Destroy Prerequisites
+	@echo "--- Destroying Prerequisites ---"
+	terraform destroy -auto-approve $(TF_PREREQS)
 
-# --- COLLECTORS (Run after Core is ready) ---
+# --- 3. OPENOBSERVE ---
 
-init-collectors:
-	cd collectors && terraform init
+install-o2: ## Plan & Apply OpenObserve
+	@echo "--- Planning OpenObserve ---"
+	terraform plan $(TF_O2) -out=o2.tfplan
+	@echo "--- Applying OpenObserve ---"
+	terraform apply o2.tfplan
+	@rm -f o2.tfplan
+	@echo "⏳ Waiting for OpenObserve ArgoCD App to Sync..."
+	@timeout 60s bash -c "until kubectl get application openobserve -n argocd-system >/dev/null 2>&1; do sleep 2; done"
+	@echo "⏳ Waiting for OpenObserve Pods..."
+	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=openobserve -n o2-system --timeout=300s || echo "⚠️  Wait timed out"
 
-plan-collectors: init-collectors ## Generate execution plan for Collectors
-	@echo "Planning Collectors..."
-	cd collectors && terraform plan -out=collectors.tfplan
-	@echo "---------------------------------------------------"
-	@echo "Plan saved to 'collectors/collectors.tfplan'. Run 'make apply-collectors' to deploy."
+uninstall-o2: ## Destroy OpenObserve (Forcefully)
+	@echo "--- Destroying OpenObserve ---"
+	-terraform destroy -auto-approve $(TF_O2)
+	
+	@echo "🧹 Force cleaning o2-system namespace..."
+	-kubectl delete application openobserve -n argocd-system --timeout=10s --wait=false
+	-kubectl delete application minio -n argocd-system --timeout=10s --wait=false
+	-kubectl delete statefulset --all -n o2-system --timeout=10s --wait=false
+	-kubectl delete deployment --all -n o2-system --timeout=10s --wait=false
+	-kubectl delete pvc --all -n o2-system --timeout=10s --wait=false
+	-kubectl delete pod --all -n o2-system --force --grace-period=0
+	
+	-for res in statefulsets deployments pvc secrets configmaps applications; do \
+		kubectl -n o2-system patch $$res --all --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+		kubectl -n argocd-system patch $$res openobserve --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+		kubectl -n argocd-system patch $$res minio --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true; \
+	done
 
-apply-collectors: ## Apply Collectors (Requires 'make plan-collectors' first)
-	@echo "Applying Collectors..."
-	cd collectors && terraform apply collectors.tfplan
-	@rm collectors/collectors.tfplan
+	@echo "✅ OpenObserve Uninstall Complete."
 
-# --- MANAGEMENT ---
+install-collectors: ## Plan & Apply Collectors
+	@echo "--- Planning Collectors ---"
+	terraform plan $(TF_COLL) -out=collectors.tfplan
+	@echo "--- Applying Collectors ---"
+	terraform apply collectors.tfplan
+	@rm -f collectors.tfplan
 
-start: ## Start Port Forwards (Background)
-	@chmod +x manage-local-connection.sh
-	@./manage-local-connection.sh start
+uninstall-collectors: ## Destroy Collectors
+	@echo "--- Destroying Collectors ---"
+	terraform destroy -auto-approve $(TF_COLL)
 
-stop: ## Stop Port Forwards
-	@chmod +x manage-local-connection.sh
-	@./manage-local-connection.sh stop
+install-demo: ## Plan & Apply OTel Demo
+	@echo "--- Planning OTel Demo ---"
+	terraform plan $(TF_DEMO) -out=demo.tfplan
+	@echo "--- Applying OTel Demo ---"
+	terraform apply demo.tfplan
+	@rm -f demo.tfplan
 
-restart: ## Restart Port Forwards
-	@chmod +x manage-local-connection.sh
-	@./manage-local-connection.sh restart
+uninstall-demo: ## Destroy OTel Demo
+	terraform destroy -auto-approve $(TF_DEMO)
 
-info: ## Show Service Credentials and URLs
-	@chmod +x manage-local-connection.sh
-	@./manage-local-connection.sh info
+install-platform: install-core install-prereqs install-o2 #start bootstrap install-collectors ## Install Full Platform
 
-# --- CLEANUP ---
+all: install-platform
 
-clean: ## Destroy Everything (Core + Collectors)
-	@echo "Stopping port-forwards..."
-	@./manage-local-connection.sh stop || true
-	@echo "Destroying Collectors..."
-	cd collectors && terraform destroy -auto-approve || true
-	@echo "Destroying Core Infrastructure..."
-	terraform destroy -auto-approve $(TF_FLAGS)
-	@echo "Cleaning up plan files..."
-	@rm -f core.tfplan collectors/collectors.tfplan
-	@rm -f bootstrap_results.json
+nuke: ## DESTROY EVERYTHING (Forcefully)
+	@echo "🔥 NUCLEAR LAUNCH DETECTED 🔥"
+	@make stop
+	-terraform destroy -auto-approve
+	
+	@echo "🧹 Force Cleaning Webhooks & APIServices..."
+	-kubectl delete mutatingwebhookconfigurations --all --timeout=10s --wait=false
+	-kubectl delete validatingwebhookconfigurations --all --timeout=10s --wait=false
+	-kubectl delete apiservices -l app.kubernetes.io/managed-by=Helm --timeout=10s --wait=false
+
+	@echo "💀 Force Cleaning Namespaces..."
+	-for ns in o2-system argocd-system cnpg-system cert-manager-system openobserve-collector-system opentelemetry-operator-system devteam-1; do \
+		if kubectl get ns $$ns >/dev/null 2>&1; then \
+			echo "   - Cleaning $$ns..."; \
+			kubectl patch ns $$ns -p '{"metadata":{"finalizers":null}}' --type=merge || true; \
+			kubectl delete ns $$ns --timeout=10s --wait=false || true; \
+		fi; \
+	done
+
+	@echo "🗑️  Uninstalling K3s..."
+	@make uninstall-core
+	rm -rf terraform.tfstate* .terraform .terraform.lock.hcl *.tfplan
+	@echo "✅ Nuke Complete."
+
+start: ## Start Port Forwarding
+	@chmod +x scripts/*.sh
+	@./scripts/port-forward-all.sh start
+	@echo "⏳ Waiting for tunnels to stabilize..."
+	@sleep 5
+
+stop: ## Stop Port Forwarding
+	@chmod +x scripts/*.sh
+	@./scripts/port-forward-all.sh stop
+
+show: ## Show URLs and Credentials
+	@chmod +x scripts/*.sh
+	@./scripts/port-forward-all.sh show
+
+bootstrap: ## Configure Tenants in OpenObserve
+	@echo "--- Bootstrapping Tenants & Importing Dashboards ---"
+	python3 o2_manager.py bootstrap

@@ -1,0 +1,18 @@
+server:
+  service:
+    type: ClusterIP
+  replicas: 1
+controller:
+  replicas: 1
+repoServer:
+  replicas: 1
+applicationSet:
+  replicas: 1
+redis-ha:
+  enabled: false
+redis:
+  enabled: true
+# ArgoCD 7.x structure for params
+configs:
+  params:
+    server.insecure: "true"
