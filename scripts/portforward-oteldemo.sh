@@ -2,7 +2,7 @@
 
 SESSION_NAME="pf-demo"
 NAMESPACE="devteam-1"
-SERVICE="svc/otel-demo-frontendproxy"
+SERVICE="svc/frontend-proxy"
 LOCAL_PORT="8080"
 REMOTE_PORT="8080"
 URL="http://localhost:$LOCAL_PORT"

@@ -344,7 +344,7 @@ spec:
   source:
     repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
     chart: opentelemetry-demo
-    targetRevision: 0.33.2
+    targetRevision: 0.39.0
     helm:
       # Load the external values file
       values: |
