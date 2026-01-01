@@ -2,6 +2,8 @@
 
 ![Screenshot of OpenObserve](assets/images/k8s_dashboard.png)
 
+![Screenshot of the OTEL demo](assets/images/otel-demo-tracing.png)
+
 > **⚠️ DISCLAIMER: WORK IN PROGRESS (Target: KubeCon 2026)**
 > This is a Pre-Alpha Proof of Concept. Security settings are relaxed for local demonstration. API contracts are subject to change.
 
