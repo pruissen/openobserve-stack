@@ -27,6 +27,25 @@ gateway:
       metrics:
         address: "0.0.0.0:8890"
 
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          # Send traces to O2 for storage AND to the connector to generate metrics
+          exporters: [otlphttp/openobserve, spanmetrics]
+        
+        metrics:
+          # Receive standard metrics (from Agents) AND generated Span Metrics
+          receivers: [otlp, spanmetrics]
+          processors: [batch]
+          exporters: [otlphttp/openobserve]
+        
+        logs:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlphttp/openobserve]
+
 # GLOBAL Exporter Override
 exporters:
   otlphttp/openobserve:
