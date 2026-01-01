@@ -6,7 +6,7 @@ default:
     - name: OTEL_SERVICE_NAME
       value: "astro-demo-app"
     - name: OTEL_COLLECTOR_NAME
-      value: "openobserve-collector-gateway-collector.openobserve-collector-system"
+      value: "openobserve-collector-gateway-collector.openobserve-collector-system.svc.cluster.local"
     # Points to the Gateway Service created by the single 'openobserve-collector' release
     # - name: OTEL_EXPORTER_OTLP_ENDPOINT
     #   value: "http://openobserve-collector-gateway.openobserve-collector-system.svc.cluster.local:4317"
