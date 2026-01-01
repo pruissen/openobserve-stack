@@ -11,7 +11,6 @@ import time
 O2_URL = "http://localhost:5080"
 ADMIN_EMAIL = "admin@platform.com"
 
-# Dashboard Templates (Official OpenObserve GitHub)
 DASHBOARDS = {
     "kubernetes": [
         "https://raw.githubusercontent.com/openobserve/dashboards/main/Kubernetes(openobserve-collector)/Kubernetes%20%20_%20Namespace%20(Pod).dashboard.json",
@@ -34,11 +33,10 @@ ORGS = [
 
 def get_admin_password():
     try:
-        # Fetches the password directly from the Kubernetes secret
         cmd = "kubectl get secret o2-platform-secret -n o2-system -o jsonpath='{.data.ZO_ROOT_USER_PASSWORD}' | base64 -d"
         return subprocess.check_output(cmd, shell=True).decode('utf-8').strip()
     except:
-        print("❌ Could not fetch password from Kubernetes. Is the cluster accessible?")
+        print("❌ Could not fetch password from Kubernetes.")
         sys.exit(1)
 
 ADMIN_PASSWORD = get_admin_password()
@@ -47,7 +45,6 @@ def get_auth():
     return (ADMIN_EMAIL, ADMIN_PASSWORD)
 
 def api_request(method, endpoint, json_data=None):
-    # Ensure no double slashes
     url = f"{O2_URL}/api/{endpoint.lstrip('/')}"
     try:
         if method == "POST":
@@ -63,38 +60,26 @@ def api_request(method, endpoint, json_data=None):
 
 def wait_for_api():
     print(f"⏳ Connecting to {O2_URL} (User: {ADMIN_EMAIL})...")
-    
     for i in range(30):
         try:
-            # 1. Health Check (Unauthenticated)
-            try:
-                r_health = requests.get(f"{O2_URL}/healthz", timeout=1)
-                
-                if r_health.status_code == 200:
-                    print(f"   ✅ Healthz OK.")
-                    # 2. Try Version Check (Authenticated)
-                    r_ver = requests.get(f"{O2_URL}/api/version", auth=get_auth(), timeout=1)
-                    if r_ver.status_code == 200:
-                        print(f"   ✅ Auth OK.")
-                        return True
-                    elif r_ver.status_code == 401:
-                        print(f"\n❌ Auth Failed (401). Password in Secret does not match Pod.")
-                        return False
-                    else:
-                        print(f"   ⚠️  API reachable but returned {r_ver.status_code}. Proceeding...")
-                        return True
+            r_health = requests.get(f"{O2_URL}/healthz", timeout=1)
+            if r_health.status_code == 200:
+                print(f"   ✅ Healthz OK.")
+                r_ver = requests.get(f"{O2_URL}/api/version", auth=get_auth(), timeout=1)
+                if r_ver.status_code == 200:
+                    print(f"   ✅ Auth OK.")
+                    return True
+                elif r_ver.status_code == 401:
+                    print(f"\n❌ Auth Failed. Password mismatch.")
+                    return False
                 else:
-                    print(f"   [Healthz: {r_health.status_code}]", end="\r", flush=True)
-            
-            except requests.exceptions.ConnectionError:
-                print(f"   [Connection Refused - Port Forward down?]", end="\r", flush=True)
-
-        except Exception as e:
-            print(f"   [Error: {e}]", end="\r", flush=True)
-            
+                    print(f"   ⚠️  API reachable but returned {r_ver.status_code}. Proceeding...")
+                    return True
+        except:
+            pass
         time.sleep(2)
-        
-    print("\n❌ API unreachable after wait.")
+        print(".", end="", flush=True)
+    print("\n❌ API unreachable.")
     return False
 
 def import_dashboards(org_id, org_name):
@@ -103,105 +88,82 @@ def import_dashboards(org_id, org_name):
         for url in urls:
             try:
                 r = requests.get(url)
-                if r.status_code != 200:
-                    print(f"        ⚠️  Download failed: {url}")
-                    continue
+                if r.status_code != 200: continue
                 dashboard_json = r.json()
-                if 'dashboardId' in dashboard_json:
-                    del dashboard_json['dashboardId']
+                if 'dashboardId' in dashboard_json: del dashboard_json['dashboardId']
                 
                 success, resp = api_request("POST", f"{org_id}/dashboards", dashboard_json)
                 if success:
-                    title = dashboard_json.get('title', 'Unknown')
-                    print(f"        ✅ Imported: {title}")
-                else:
-                    if "already exists" in str(resp):
-                        pass # Silent on duplicates
-                    else:
-                        print(f"        ❌ Failed: {resp}")
-            except Exception as e:
-                print(f"        ❌ Error: {e}")
+                    print(f"        ✅ Imported: {dashboard_json.get('title','Unknown')}")
+                elif "already exists" not in str(resp):
+                    print(f"        ❌ Failed: {resp}")
+            except:
+                pass
 
 def get_role_for_org(org_id):
-    """Fetches valid roles for an organization and returns the first non-admin one (e.g. 'member' or 'viewer')."""
     success, resp = api_request("GET", f"{org_id}/roles")
     if success and 'data' in resp:
-        # Try to find a 'member' or 'viewer' role
         for role in resp['data']:
-            if role['name'].lower() in ['member', 'viewer', 'editor']:
-                return role['identifier'] # Use the ID, not the name
-        # Fallback to the first role found if specific ones aren't there
+            if role['name'].lower() in ['member', 'viewer']:
+                return role['identifier']
         if len(resp['data']) > 0:
             return resp['data'][0]['identifier']
-    return "admin" # Fallback to admin if role list fails
+    return "admin"
 
 def bootstrap():
-    if not wait_for_api():
-        sys.exit(1)
-
+    if not wait_for_api(): sys.exit(1)
     print(f"\n🔑 Using Admin: {ADMIN_EMAIL}")
     
+    # 1. SETUP DEFAULT ORG (Important for Full Observability)
+    print("\n🏢 Processing Org: default...")
+    import_dashboards("default", "default")
+
+    # 2. SETUP TENANT ORGS
+    existing_orgs = {}
+    s, resp = api_request("GET", "organizations")
+    if s and 'data' in resp:
+        for o in resp['data']:
+            existing_orgs[o['name']] = o['identifier']
+
     for org in ORGS:
-        print(f"\n🏢 Processing Org: {org['name']}...")
-        success, resp = api_request("POST", "organizations", {"name": org['name']})
+        name = org['name']
+        org_id = existing_orgs.get(name)
+
+        print(f"\n🏢 Processing Org: {name}...")
         
-        org_id = None
-        
-        # --- ROBUST RESPONSE HANDLING ---
-        if success:
-            # Case 1: Nested data (Older API)
-            if 'data' in resp and 'identifier' in resp['data']:
-                org_id = resp['data']['identifier']
-            # Case 2: Direct Object (Newer API 0.23+)
-            elif 'identifier' in resp:
-                org_id = resp['identifier']
-            
-            if org_id:
-                print(f"   ✅ Organization Ready ({org_id})")
-            else:
-                print(f"   ⚠️  Created but ID not found in response: {json.dumps(resp)}")
-                
+        if org_id:
+            print(f"   ℹ️  Organization exists ({org_id}). Updating...")
         else:
-            if "already exists" in str(resp) or "duplicate" in str(resp).lower():
-                print(f"   ℹ️  Organization exists.")
-                # Lookup ID
-                s, list_resp = api_request("GET", "organizations")
-                if s and 'data' in list_resp:
-                    # Filter to find the ID
-                    org_id = next((o['identifier'] for o in list_resp['data'] if o['name'] == org['name']), None)
+            success, resp = api_request("POST", "organizations", {"name": name})
+            if success:
+                if 'data' in resp and 'identifier' in resp['data']:
+                    org_id = resp['data']['identifier']
+                elif 'identifier' in resp:
+                    org_id = resp['identifier']
+                print(f"   ✅ Created Organization ({org_id})")
             else:
-                print(f"   ❌ Failed to create org: {resp}")
+                print(f"   ❌ Failed to create: {resp}")
                 continue
 
         if org_id:
-            import_dashboards(org_id, org['name'])
+            import_dashboards(org_id, name)
 
-    # User Creation Logic
+    # 3. USER CREATION
     print("\n👤 Creating DevTeam User...")
     s, resp = api_request("GET", "organizations")
     if s and 'data' in resp:
         org_id = next((o['identifier'] for o in resp['data'] if o['name'] == 'devteam_1'), None)
         
         if org_id:
-            # FIX: Dynamically fetch a valid role ID for this Org
             role_id = get_role_for_org(org_id)
-            print(f"   ℹ️  Assigning Role: {role_id}")
-
             user_payload = {
-                "email": "dev@devteam-1.com",
-                "first_name": "Dev", 
-                "last_name": "User",
-                "password": "DevTeamPass123!",
-                "role": role_id 
+                "email": "dev@devteam-1.com", "first_name": "Dev", "last_name": "User",
+                "password": "DevTeamPass123!", "role": role_id
             }
             s, r = api_request("POST", f"{org_id}/users", user_payload)
             if s: print(f"   ✅ User created.")
-            else: 
-                # If user exists, that's fine
-                if "already exists" in str(r):
-                    print(f"   ℹ️  User already exists.")
-                else:
-                    print(f"   ❌ Failed: {r}")
+            elif "already exists" in str(r): print(f"   ℹ️  User already exists.")
+            else: print(f"   ❌ Failed: {r}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "bootstrap":

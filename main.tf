@@ -48,10 +48,9 @@ resource "random_password" "admin_pass" {
 }
 
 locals {
+  # This creates the Base64 encoded string "user:password"
   root_auth_token = base64encode("${var.admin_email}:${random_password.admin_pass.result}")
   tracing_header_val = "Basic ${base64encode("${var.admin_email}:${random_password.admin_pass.result}")}"
-  
-  # DSN for the built-in Postgres (CloudNativePG)
   builtin_dsn = "postgres://openobserve:${random_password.admin_pass.result}@openobserve-postgres-rw.o2-system.svc:5432/app"
 }
 
@@ -72,36 +71,22 @@ resource "kubernetes_secret" "o2_platform_secret" {
   }
   
   data = {
-    # --- ArgoCD ---
     "admin.password" = bcrypt(random_password.admin_pass.result)
     password         = base64encode(random_password.admin_pass.result)
-
-    # --- MinIO Credentials ---
-    # Used by Official Chart 'existingSecret' mapping
     rootUser          = "admin"
     rootPassword      = random_password.admin_pass.result
-    # Extra keys just in case
     "root-user"       = "admin"
     "root-password"   = random_password.admin_pass.result
     accessKey         = "admin"
     secretKey         = random_password.admin_pass.result
-
-    # --- Postgres Credentials ---
     "postgres-password" = random_password.admin_pass.result
-    password            = random_password.admin_pass.result
-
-    # --- OpenObserve Root ---
     ROOT_AUTH             = local.root_auth_token
     ZO_ROOT_USER_EMAIL    = var.admin_email
     ZO_ROOT_USER_PASSWORD = random_password.admin_pass.result
     ZO_ROOT_USER_TOKEN    = "" 
-    
-    # --- Database & Storage Keys ---
     ZO_META_POSTGRES_DSN    = local.builtin_dsn
     ZO_S3_ACCESS_KEY        = "admin"
     ZO_S3_SECRET_KEY        = random_password.admin_pass.result
-    
-    # --- Tracing ---
     ZO_TRACING_HEADER_KEY   = "Authorization"
     ZO_TRACING_HEADER_VALUE = local.tracing_header_val
   }
@@ -173,7 +158,6 @@ resource "null_resource" "wait_for_cnpg" {
   }
 }
 
-# MinIO (Official Chart) as an ArgoCD Application
 resource "kubectl_manifest" "minio" {
   yaml_body = yamlencode({
     apiVersion = "argoproj.io/v1alpha1"
@@ -189,56 +173,31 @@ resource "kubectl_manifest" "minio" {
         repoURL        = "https://charts.min.io"
         chart          = "minio"
         targetRevision = "5.3.0"
-        helm = {
-          values = file("${path.module}/k8s/values/minio.yaml")
-        }
+        helm = { values = file("${path.module}/k8s/values/minio.yaml") }
       }
       destination = {
         server    = "https://kubernetes.default.svc"
         namespace = "o2-system"
       }
       syncPolicy = {
-        automated = {
-          prune    = true
-          selfHeal = true
-        }
+        automated = { prune = true, selfHeal = true }
         syncOptions = ["ServerSideApply=true"]
       }
     }
   })
-
-  # FIX: Explicit dependency on ArgoCD
-  depends_on = [
-    kubernetes_secret.o2_platform_secret,
-    helm_release.argocd
-  ]
+  depends_on = [kubernetes_secret.o2_platform_secret, helm_release.argocd]
 }
 
-# ----------------------------------------------------------------------------
-# BLOCKER: WAIT FOR MINIO HEALTH
-# ----------------------------------------------------------------------------
-# This resource forces Terraform to pause until MinIO is actually running
-# before it proceeds to create the OpenObserve application.
 resource "null_resource" "wait_for_minio_healthy" {
   depends_on = [kubectl_manifest.minio]
-
   provisioner "local-exec" {
     environment = { KUBECONFIG = pathexpand("~/.kube/config") }
     command = <<EOT
-      echo "⏳ MinIO Manifest submitted. Waiting for ArgoCD to sync and Pods to be ready..."
-      
-      # 1. Wait for ArgoCD to pick up the app (it might take a few seconds to appear)
+      echo "⏳ Waiting for MinIO..."
       timeout 30s bash -c "until kubectl get application minio -n argocd-system >/dev/null 2>&1; do sleep 2; done"
-      
-      # 2. Wait for the Service/StatefulSet to appear
-      echo "   ... Waiting for MinIO service..."
       timeout 60s bash -c "until kubectl get service minio -n o2-system >/dev/null 2>&1; do sleep 2; done"
-      
-      # 3. Wait for the Pod to be Ready
-      echo "   ... Waiting for MinIO pod readiness..."
       kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=minio -n o2-system --timeout=120s
-      
-      echo "✅ MinIO is Ready. Proceeding to OpenObserve..."
+      echo "✅ MinIO Ready."
     EOT
   }
 }
@@ -278,12 +237,8 @@ spec:
     server: https://kubernetes.default.svc
     namespace: openobserve-collector-system
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - ServerSideApply=true
-      - Replace=true
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, Replace=true]
 YAML
   depends_on = [helm_release.argocd]
 }
@@ -329,13 +284,7 @@ resource "kubectl_manifest" "openobserve" {
         helm = {
           values = yamlencode(merge(
             yamldecode(file("${path.module}/k8s/values/openobserve.yaml")),
-            {
-              postgres = {
-                spec = {
-                  password = random_password.admin_pass.result
-                }
-              }
-            }
+            { postgres = { spec = { password = random_password.admin_pass.result } } }
           ))
         }
       }
@@ -344,25 +293,20 @@ resource "kubectl_manifest" "openobserve" {
         namespace = "o2-system"
       }
       syncPolicy = {
-        automated = {
-          prune    = true
-          selfHeal = true
-        }
+        automated = { prune = true, selfHeal = true }
         syncOptions = ["ServerSideApply=true"]
       }
     }
   })
-
   depends_on = [
     kubernetes_secret.o2_platform_secret,
     null_resource.wait_for_cnpg,
-    # DEPENDENCY: Terraform won't create this App until MinIO is confirmed healthy
     null_resource.wait_for_minio_healthy
   ]
 }
 
 # ============================================================================
-# 5. COLLECTORS & DEMO
+# 5. COLLECTOR (Single Application)
 # ============================================================================
 
 resource "kubectl_manifest" "o2_collector" {
@@ -375,19 +319,21 @@ spec:
   source:
     repoURL: https://charts.openobserve.ai
     chart: openobserve-collector
-    targetRevision: 0.6.2
+    targetRevision: 0.4.1
     helm:
       values: |
-        ${indent(8, file("${path.module}/k8s/values/collector.yaml"))}
-      extraEnvVars:
-        - name: ROOT_AUTH
-          valueFrom: { secretKeyRef: { name: o2-platform-secret, key: ROOT_AUTH } }
+        ${indent(8, templatefile("${path.module}/k8s/values/collector.yaml", {
+          root_auth = local.root_auth_token
+        }))}
   destination: { server: https://kubernetes.default.svc, namespace: openobserve-collector-system }
   syncPolicy: { automated: { prune: true, selfHeal: true }, syncOptions: [ServerSideApply=true] }
 YAML
   depends_on = [kubectl_manifest.openobserve, kubectl_manifest.otel_operator]
 }
 
+# ============================================================================
+# 6. DEMO APP
+# ============================================================================
 resource "kubectl_manifest" "otel_demo" {
   yaml_body = <<YAML
 apiVersion: argoproj.io/v1alpha1
@@ -400,17 +346,11 @@ spec:
     chart: opentelemetry-demo
     targetRevision: 0.33.2
     helm:
+      # Load the external values file
       values: |
-        opentelemetry-collector:
-          enabled: false
-        jaeger:
-          enabled: false
-        prometheus:
-          enabled: false
-        grafana:
-          enabled: false
+        ${indent(8, file("${path.module}/k8s/values/astronomy-shop.yaml"))}
   destination: { server: https://kubernetes.default.svc, namespace: devteam-1 }
   syncPolicy: { automated: { prune: true, selfHeal: true } }
 YAML
-  depends_on = [helm_release.argocd]
+  depends_on = [kubectl_manifest.o2_collector]
 }

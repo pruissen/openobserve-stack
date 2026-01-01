@@ -1,0 +1,42 @@
+# k8s/values/astronomy-shop.yaml
+# Compatible with opentelemetry-demo chart v0.31.0+
+
+default:
+  env:
+    - name: OTEL_SERVICE_NAME
+      value: "astro-demo-app"
+    - name: OTEL_COLLECTOR_NAME
+      value: "alloy-app-gateway"
+    # Points to the Gateway Service created by the single 'openobserve-collector' release
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: "http://openobserve-collector-gateway.openobserve-collector-system.svc.cluster.local:4317"
+    - name: OTEL_EXPORTER_OTLP_INSECURE
+      value: "true"
+    - name: OTEL_RESOURCE_ATTRIBUTES
+      value: "service.name=astro-demo-app,space=devteam-1,deployment.environment=production"
+
+components:
+  loadgenerator:
+    enabled: true
+    env:
+      - name: OTEL_EXPORTER_OTLP_ENDPOINT
+        value: "http://openobserve-collector-gateway.openobserve-collector-system.svc.cluster.local:4317"
+      - name: OTEL_EXPORTER_OTLP_INSECURE
+        value: "true"
+    
+  frontendProxy:
+    service:
+      type: ClusterIP
+      port: 8080
+
+# Disable Internal Demo Stack (We use OpenObserve instead)
+opentelemetry-collector:
+  enabled: false
+jaeger:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false

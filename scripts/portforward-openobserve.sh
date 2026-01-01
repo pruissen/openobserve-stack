@@ -6,7 +6,7 @@ SERVICE="svc/openobserve-router"
 LOCAL_PORT="5080"
 REMOTE_PORT="5080"
 URL="http://localhost:$LOCAL_PORT"
-API_URL="http://localhost:$LOCAL_PORT/api"
+API_URL="http://localhost:$LOCAL_PORT/swagger"
 USER="admin@platform.com"
 
 get_password() {

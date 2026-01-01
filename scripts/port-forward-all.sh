@@ -2,25 +2,32 @@
 
 SCRIPT_DIR=$(dirname "$0")
 
+# Colors
+BOLD="\033[1m"
+RESET="\033[0m"
+GREEN="\033[32m"
+BLUE="\033[34m"
+CYAN="\033[36m"
+GRAY="\033[90m"
+
 # Icons
 ICON_START="🚀"
 ICON_STOP="🛑"
 ICON_RESTART="♻️ "
 ICON_SHOW="🔍"
 ICON_ERROR="❌"
-ICON_SUCCESS="✅"
 
 check_screen() {
     if ! command -v screen &> /dev/null; then
-        echo "$ICON_ERROR Error: 'screen' is not installed."
+        echo -e "${RED}$ICON_ERROR Error: 'screen' is not installed.${RESET}"
         exit 1
     fi
 }
 
 start_all() {
-    echo "======================================================="
-    echo "$ICON_START   STARTING PORT FORWARDS (SCREEN SESSIONS)"
-    echo "======================================================="
+    echo -e "${BLUE}=======================================================${RESET}"
+    echo -e "${BOLD}$ICON_START   STARTING PORT FORWARDS${RESET}"
+    echo -e "${BLUE}=======================================================${RESET}"
     $SCRIPT_DIR/portforward-argocd.sh start
     $SCRIPT_DIR/portforward-openobserve.sh start
     $SCRIPT_DIR/portforward-minio.sh start
@@ -30,9 +37,9 @@ start_all() {
 }
 
 stop_all() {
-    echo "======================================================="
-    echo "$ICON_STOP   STOPPING PORT FORWARDS"
-    echo "======================================================="
+    echo -e "${BLUE}=======================================================${RESET}"
+    echo -e "${BOLD}$ICON_STOP   STOPPING PORT FORWARDS${RESET}"
+    echo -e "${BLUE}=======================================================${RESET}"
     $SCRIPT_DIR/portforward-argocd.sh stop
     $SCRIPT_DIR/portforward-openobserve.sh stop
     $SCRIPT_DIR/portforward-minio.sh stop
@@ -40,12 +47,13 @@ stop_all() {
 }
 
 restart_all() {
-    echo "======================================================="
-    echo "$ICON_RESTART RESTARTING PORT FORWARDS"
-    echo "======================================================="
+    echo -e "${BLUE}=======================================================${RESET}"
+    echo -e "${BOLD}$ICON_RESTART RESTARTING PORT FORWARDS${RESET}"
+    echo -e "${BLUE}=======================================================${RESET}"
     stop_all
-    echo "⏳ Waiting for cleanup..."
+    echo -e "${GRAY}⏳ Waiting for cleanup...${RESET}"
     sleep 2
+    echo ""
     start_all
 }
 
@@ -63,14 +71,16 @@ case "$1" in
         ;;
     show)
         echo ""
-        echo "=========================================================================================================="
-        printf "%-15s | %-30s | %-20s | %-15s | %s\n" "SERVICE" "URL" "USER" "PASSWORD" "STATUS"
-        echo "----------------------------------------------------------------------------------------------------------"
+        echo -e "${BOLD}ACCESS INFORMATION${RESET}"
+        echo -e "${GRAY}----------------------------------------------------------------------------------------------------------------------------------${RESET}"
+        # Adjusted widths: Service(15) | URL(35) | User(25) | Pass(25) | Status
+        printf "${CYAN}%-15s${RESET} | ${CYAN}%-35s${RESET} | ${CYAN}%-25s${RESET} | ${CYAN}%-25s${RESET} | ${CYAN}%s${RESET}\n" "SERVICE" "URL" "USER" "PASSWORD" "STATUS"
+        echo -e "${GRAY}----------------------------------------------------------------------------------------------------------------------------------${RESET}"
         $SCRIPT_DIR/portforward-argocd.sh show
         $SCRIPT_DIR/portforward-openobserve.sh show
         $SCRIPT_DIR/portforward-minio.sh show
         $SCRIPT_DIR/portforward-oteldemo.sh show
-        echo "=========================================================================================================="
+        echo -e "${GRAY}----------------------------------------------------------------------------------------------------------------------------------${RESET}"
         echo ""
         ;;
     *)

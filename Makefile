@@ -3,7 +3,7 @@
 KUBECONFIG := $(HOME)/.kube/config
 export KUBECONFIG
 
-# Terraform Targets
+# Terraform Targets - Prerequisites
 TF_PREREQS := -target=kubernetes_namespace.ns \
               -target=kubernetes_secret.o2_platform_secret \
               -target=helm_release.argocd \
@@ -16,14 +16,17 @@ TF_PREREQS := -target=kubernetes_namespace.ns \
 
 # Target the ArgoCD Application for OpenObserve
 TF_O2      := -target=kubectl_manifest.openobserve
-              
+
+# Single Collector Target
 TF_COLL    := -target=kubectl_manifest.o2_collector
+
+# Demo Application
 TF_DEMO    := -target=kubectl_manifest.otel_demo
 
-.PHONY: all help install-core init uninstall-core install-prereqs uninstall-prereqs install-o2 uninstall-o2 install-collectors uninstall-collectors install-demo uninstall-demo install-platform nuke info start stop show
+.PHONY: all help install-core init uninstall-core install-prereqs uninstall-prereqs install-o2 uninstall-o2 install-o2-collector uninstall-o2-collector install-demo uninstall-demo install-platform nuke info start stop show bootstrap
 
 help: ## Show help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 # --- 1. CORE (K3s + TF Init) ---
 
@@ -33,7 +36,8 @@ install-core: ## Install K3s and Init Terraform
 	@echo "--- Waiting for K3s ---"
 	@sleep 10
 	mkdir -p ~/.kube
-	cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+	sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+	sudo chown $(USER) ~/.kube/config
 	@chmod 600 ~/.kube/config
 	@make init
 
@@ -71,10 +75,21 @@ install-o2: ## Plan & Apply OpenObserve
 	@echo "--- Applying OpenObserve ---"
 	terraform apply o2.tfplan
 	@rm -f o2.tfplan
-	@echo "⏳ Waiting for OpenObserve ArgoCD App to Sync..."
-	@timeout 60s bash -c "until kubectl get application openobserve -n argocd-system >/dev/null 2>&1; do sleep 2; done"
-	@echo "⏳ Waiting for OpenObserve Pods..."
-	@kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=openobserve -n o2-system --timeout=300s || echo "⚠️  Wait timed out"
+	
+	@echo "⏳ [1/4] Waiting for OpenObserve Application..."
+	@timeout 120s bash -c "until kubectl get application openobserve -n argocd-system >/dev/null 2>&1; do sleep 2; done"
+	
+	@echo "⏳ [2/4] Waiting for ArgoCD to create workloads (Router & Ingester)..."
+	@timeout 180s bash -c "until kubectl get deployment openobserve-router -n o2-system >/dev/null 2>&1; do sleep 5; done"
+	@timeout 180s bash -c "until kubectl get statefulset openobserve-ingester -n o2-system >/dev/null 2>&1; do sleep 5; done"
+	
+	@echo "⏳ [3/4] Waiting for Ingester (Write Path) to be Ready..."
+	@kubectl rollout status statefulset/openobserve-ingester -n o2-system --timeout=300s
+	
+	@echo "⏳ [4/4] Waiting for Router (Read Path) to be Available..."
+	@kubectl wait --for=condition=available deployment/openobserve-router -n o2-system --timeout=300s
+	
+	@echo "✅ OpenObserve is Fully Ready."
 
 uninstall-o2: ## Destroy OpenObserve (Forcefully)
 	@echo "--- Destroying OpenObserve ---"
@@ -96,16 +111,19 @@ uninstall-o2: ## Destroy OpenObserve (Forcefully)
 
 	@echo "✅ OpenObserve Uninstall Complete."
 
-install-collectors: ## Plan & Apply Collectors
-	@echo "--- Planning Collectors ---"
-	terraform plan $(TF_COLL) -out=collectors.tfplan
-	@echo "--- Applying Collectors ---"
-	terraform apply collectors.tfplan
-	@rm -f collectors.tfplan
+# --- 4. COLLECTOR ---
 
-uninstall-collectors: ## Destroy Collectors
-	@echo "--- Destroying Collectors ---"
+install-o2-collector: ## Install OpenObserve Collector
+	@echo "--- Installing OpenObserve Collector ---"
+	terraform plan $(TF_COLL) -out=collector.tfplan
+	terraform apply collector.tfplan
+	@rm -f collector.tfplan
+
+uninstall-o2-collector: ## Uninstall OpenObserve Collector
+	@echo "--- Destroying OpenObserve Collector ---"
 	terraform destroy -auto-approve $(TF_COLL)
+
+# --- 5. DEMO ---
 
 install-demo: ## Plan & Apply OTel Demo
 	@echo "--- Planning OTel Demo ---"
@@ -117,9 +135,12 @@ install-demo: ## Plan & Apply OTel Demo
 uninstall-demo: ## Destroy OTel Demo
 	terraform destroy -auto-approve $(TF_DEMO)
 
-install-platform: install-prereqs install-o2 start bootstrap install-collectors ## Install Full Platform
+# --- 6. META ---
 
-all: install-core  install-platform
+# FIX: Added 'install-core' back to the chain so K3s is actually installed before we try to deploy apps
+install-platform: install-core install-prereqs install-o2 start bootstrap install-o2-collector ## Install Full Platform
+
+all: install-platform
 
 nuke: ## DESTROY EVERYTHING (Forcefully)
 	@echo "🔥 NUCLEAR LAUNCH DETECTED 🔥"
@@ -144,6 +165,8 @@ nuke: ## DESTROY EVERYTHING (Forcefully)
 	@make uninstall-core
 	rm -rf terraform.tfstate* .terraform .terraform.lock.hcl *.tfplan
 	@echo "✅ Nuke Complete."
+
+# --- 7. OPERATIONS ---
 
 start: ## Start Port Forwarding
 	@chmod +x scripts/*.sh

@@ -1,61 +1,41 @@
-mode: deployment
+# k8s/values/collector.yaml
+
+k8sCluster: "k3s-cluster"
+
+opentelemetry-operator:
+  enabled: false
+
 image:
   repository: "otel/opentelemetry-collector-contrib"
-  tag: "0.114.0"
+  tag: "0.104.0"
 
-# Inject the secret for Authorization Headers
-extraEnvVars:
-  - name: ROOT_AUTH
-    valueFrom: { secretKeyRef: { name: o2-platform-secret, key: ROOT_AUTH } }
-
-config:
-  processors:
-    k8sattributes:
-      auth_type: "serviceAccount"
-      passthrough: false
-      extract:
-        metadata:
-          - k8s.pod.name
-          - k8s.deployment.name
-          - k8s.namespace.name
-    routing:
-      from_attribute: k8s.namespace.name
-      table:
-        - value: devteam-1
-          exporters: [otlphttp/devteam1]
-        - value: o2-system
-          exporters: [otlphttp/platform_obs]
-        - value: openobserve-collector-system
-          exporters: [otlphttp/platform_obs]
-      default_exporters: [otlphttp/platform_k8s]
-
-  exporters:
-    otlphttp/platform_k8s:
-      endpoint: "http://openobserve-router.o2-system.svc.cluster.local:5080/api/platform-k8s"
-      tls: { insecure: true }
-      headers:
-        Authorization: "Basic ${env:ROOT_AUTH}"
-
-    otlphttp/platform_obs:
-      endpoint: "http://openobserve-router.o2-system.svc.cluster.local:5080/api/platform-obs"
-      tls: { insecure: true }
-      headers:
-        Authorization: "Basic ${env:ROOT_AUTH}"
-
-    otlphttp/devteam1:
-      endpoint: "http://openobserve-router.o2-system.svc.cluster.local:5080/api/devteam-1"
-      tls: { insecure: true }
-      headers:
-        Authorization: "Basic ${env:ROOT_AUTH}"
-
+# 1. AGENT (DaemonSet)
+agent:
+  enabled: true
+  # Fix: Change internal telemetry port to avoid Host Network collisions
   service:
-    pipelines:
-      logs:
-        processors: [k8sattributes, routing]
-        exporters: [otlphttp/platform_k8s, otlphttp/platform_obs, otlphttp/devteam1]
+    telemetry:
       metrics:
-        processors: [k8sattributes, routing]
-        exporters: [otlphttp/platform_k8s, otlphttp/platform_obs, otlphttp/devteam1]
-      traces:
-        processors: [k8sattributes, routing]
-        exporters: [otlphttp/platform_k8s, otlphttp/platform_obs, otlphttp/devteam1]
+        address: "0.0.0.0:8889"
+
+# 2. GATEWAY (Deployment)
+gateway:
+  enabled: true
+  # Fix: Change internal telemetry port just in case
+  service:
+    telemetry:
+      metrics:
+        address: "0.0.0.0:8890"
+
+# GLOBAL Exporter Override
+exporters:
+  otlphttp/openobserve:
+    endpoint: "http://openobserve-router.o2-system.svc.cluster.local:5080/api/default"
+    headers:
+      Authorization: "Basic ${root_auth}"
+  
+  otlphttp/openobserve_k8s_events:
+    endpoint: "http://openobserve-router.o2-system.svc.cluster.local:5080/api/default"
+    headers:
+      Authorization: "Basic ${root_auth}"
+      stream-name: "k8s_events"
